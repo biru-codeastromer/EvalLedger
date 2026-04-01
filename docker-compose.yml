@@ -1,0 +1,139 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: evalledger-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: evalledger
+      POSTGRES_USER: evalledger
+      POSTGRES_PASSWORD: evalledger
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evalledger -d evalledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: evalledger-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio:latest
+    container_name: evalledger-minio
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: evalledger
+      MINIO_ROOT_PASSWORD: evalledgersecret
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  api:
+    build:
+      context: ./backend
+    container_name: evalledger-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://evalledger:evalledger@postgres:5432/evalledger
+      SYNC_DATABASE_URL: postgresql+psycopg://evalledger:evalledger@postgres:5432/evalledger
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      JWT_SECRET_KEY: evalledger-dev-secret
+      STORAGE_BACKEND: s3
+      STORAGE_BUCKET: evalledger-artifacts
+      STORAGE_S3_ENDPOINT_URL: http://minio:9000
+      STORAGE_S3_ACCESS_KEY_ID: evalledger
+      STORAGE_S3_SECRET_ACCESS_KEY: evalledgersecret
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_PRESIGN_ENDPOINT: http://localhost:9000
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend-storage:/app/storage
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+    container_name: evalledger-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgresql+asyncpg://evalledger:evalledger@postgres:5432/evalledger
+      SYNC_DATABASE_URL: postgresql+psycopg://evalledger:evalledger@postgres:5432/evalledger
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      JWT_SECRET_KEY: evalledger-dev-secret
+      STORAGE_BACKEND: s3
+      STORAGE_BUCKET: evalledger-artifacts
+      STORAGE_S3_ENDPOINT_URL: http://minio:9000
+      STORAGE_S3_ACCESS_KEY_ID: evalledger
+      STORAGE_S3_SECRET_ACCESS_KEY: evalledgersecret
+      STORAGE_S3_REGION: us-east-1
+      STORAGE_S3_PRESIGN_ENDPOINT: http://localhost:9000
+    volumes:
+      - ./backend:/app
+      - backend-storage:/app/storage
+    command: uv run celery -A app.tasks.contamination_tasks.celery_app worker --loglevel=info
+
+  frontend:
+    image: node:20-bookworm-slim
+    container_name: evalledger-frontend
+    working_dir: /app
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      API_INTERNAL_URL: http://api:8000
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    command: sh -c "corepack enable && pnpm install && pnpm dev --hostname 0.0.0.0 --port 3000"
+
+volumes:
+  postgres-data:
+  minio-data:
+  backend-storage:
+

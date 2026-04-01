@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://evalledger.dev/schemas/metadata-schema.json",
+  "title": "EvalLedger Metadata Standard v0.1",
+  "type": "object",
+  "required": ["benchmark", "version"],
+  "properties": {
+    "benchmark": {
+      "type": "object",
+      "required": ["name", "slug", "description", "domain", "task_type"],
+      "properties": {
+        "name": { "type": "string", "minLength": 2, "maxLength": 200 },
+        "slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+        "description": { "type": "string", "minLength": 20, "maxLength": 500 },
+        "domain": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "task_type": { "type": "string" },
+        "paper_url": { "type": "string", "format": "uri" },
+        "github_url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+    "version": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "artifact_sha256": { "type": ["string", "null"] },
+        "num_examples": { "type": ["integer", "null"], "minimum": 0 },
+        "splits": {
+          "type": ["object", "null"],
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "language": {
+          "type": ["array", "null"],
+          "items": { "type": "string" }
+        },
+        "license": { "type": ["string", "null"] },
+        "released_at": { "type": ["string", "null"], "format": "date" },
+        "release_notes": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}
+
