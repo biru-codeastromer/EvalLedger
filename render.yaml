@@ -23,10 +23,7 @@ services:
       - key: APP_ENV
         value: production
       - key: APP_URL
-        fromService:
-          name: evalledger-api
-          type: web
-          property: url
+        sync: false
       - key: FRONTEND_URL
         value: https://eval-ledger.vercel.app
       - key: DATABASE_URL
