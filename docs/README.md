@@ -4,6 +4,7 @@ This directory holds the maintainer-facing documents that turn the codebase into
 
 ## Operations
 
+- `docs/operations/deployment.md`
 - `docs/operations/incident-response.md`
 - `docs/operations/backup-restore.md`
 
