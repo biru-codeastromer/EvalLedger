@@ -21,12 +21,6 @@
   --status-contaminated-bg: #f5eaea;
   --status-pending: #8a8680;
   --status-pending-bg: #f0ede8;
-  --font-sans: "Anthropic Sans", var(--font-anthropic-sans), system-ui, -apple-system, sans-serif;
-  --font-serif: "Anthropic Serif", var(--font-anthropic-serif), Georgia, "Times New Roman", serif;
-  --font-mono: "Anthropic Mono", var(--font-anthropic-mono), "JetBrains Mono", "Courier New", monospace;
-  --font-display: var(--font-sans);
-  --font-body: var(--font-serif);
-  --font-ui: var(--font-sans);
 }
 
 * {
@@ -42,7 +36,16 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
-  line-height: 1.78;
+  line-height: 1.4;
+}
+
+.site-shell {
+  --font-sans: var(--font-anthropic-sans), Arial, sans-serif;
+  --font-serif: var(--font-anthropic-serif), Georgia, serif;
+  --font-mono: var(--font-anthropic-mono), "JetBrains Mono", monospace;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-serif);
+  --font-ui: var(--font-sans);
 }
 
 a {
@@ -88,17 +91,17 @@ img {
 .display-xl {
   font-family: var(--font-display);
   font-size: clamp(3.4rem, 6vw, 4.5rem);
-  line-height: 1.02;
-  letter-spacing: -0.04em;
-  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: normal;
+  font-weight: 700;
 }
 
 .display-lg {
   font-family: var(--font-display);
   font-size: clamp(2.4rem, 4vw, 3.35rem);
-  line-height: 1.08;
-  letter-spacing: -0.04em;
-  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: normal;
+  font-weight: 600;
 }
 
 .display-serif {
@@ -107,7 +110,8 @@ img {
 
 .body-copy {
   font-family: var(--font-body);
-  font-size: 16px;
+  font-size: 18px;
+  line-height: 1.4;
   color: var(--text-dim);
 }
 
@@ -115,8 +119,10 @@ img {
   background: var(--accent);
   color: var(--accent-fg);
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 16px;
+  line-height: 1;
+  letter-spacing: -0.005em;
+  font-weight: 400;
   padding: 10px 20px;
   border: none;
   border-radius: 4px;
@@ -128,7 +134,8 @@ img {
   background: transparent;
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: 16px;
+  line-height: 1;
   font-weight: 400;
   padding: 10px 20px;
   border: 1px solid var(--border);
@@ -170,6 +177,7 @@ img {
 
 .prose-rfc {
   font-family: var(--font-body);
+  line-height: 1.6;
 }
 
 .prose-rfc code,
