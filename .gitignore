@@ -1,6 +1,7 @@
 .DS_Store
 .env
 .env.local
+.env.production.local
 .venv
 __pycache__/
 .pytest_cache/
@@ -25,5 +26,7 @@ frontend/node_modules/
 frontend/playwright-report/
 frontend/test-results/
 frontend/coverage/
+frontend/tsconfig.tsbuildinfo
 cli/.venv/
 *.pyc
+*.tsbuildinfo

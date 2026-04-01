@@ -7,6 +7,23 @@ const SAMPLE_ARTIFACT = {
 };
 
 test("submit flow only advances when required inputs are present", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem(
+      "evalledger.session",
+      JSON.stringify({
+        access_token: "token-123",
+        token_type: "bearer",
+        user: {
+          id: "user-1",
+          email: "researcher@example.com",
+          username: "researcher",
+          is_verified: true,
+          is_admin: false
+        }
+      })
+    );
+  });
+
   await page.goto("/submit");
 
   const stepOneButton = page.getByRole("button", { name: "Continue" });

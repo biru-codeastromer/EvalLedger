@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,11 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.dependencies import OptionalUser, SessionDep
+from app.dependencies import CurrentUser, SessionDep
 from app.errors import AppError
+from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
 from app.models.contamination import ContaminationReport, ReferenceCorpus
 from app.models.version import BenchmarkVersion
+from app.schemas.audit import AuditEventResponse
 from app.schemas.contamination import ContaminationReportItem
 from app.schemas.version import (
     CitationFormats,
@@ -23,9 +26,11 @@ from app.schemas.version import (
     VersionDetail,
     VersionListItem,
 )
+from app.services.audit import record_audit_event
 from app.services.storage import StorageService
 from app.services.versioning import VersioningService
 from app.tasks.contamination_tasks import run_contamination_check
+from app.utils.uploads import validate_upload_file
 
 router = APIRouter()
 settings = get_settings()
@@ -37,7 +42,10 @@ CitationFormatQuery = Annotated[str | None, Query()]
 def _parse_json_field(raw_value: str | None) -> dict[str, Any] | None:
     if raw_value is None or not raw_value.strip():
         return None
-    payload = json.loads(raw_value)
+    try:
+        payload = json.loads(raw_value)
+    except JSONDecodeError as exc:
+        raise AppError("invalid_metadata", "Expected a valid JSON object payload", status_code=400) from exc
     if not isinstance(payload, dict):
         raise AppError("invalid_metadata", "Expected a JSON object payload", status_code=400)
     return payload
@@ -98,7 +106,7 @@ async def create_version(
     session: SessionDep,
     artifact: Annotated[UploadFile, File()],
     version: Annotated[str, Form()],
-    current_user: OptionalUser = None,
+    current_user: CurrentUser,
     num_examples: Annotated[int | None, Form()] = None,
     splits: Annotated[str | None, Form()] = None,
     language: Annotated[str | None, Form()] = None,
@@ -111,6 +119,10 @@ async def create_version(
     released_at: Annotated[str | None, Form()] = None,
 ) -> VersionCreateResponse:
     benchmark = await _fetch_benchmark(session, slug)
+    if benchmark.submitter_id is None:
+        benchmark.submitter_id = current_user.id
+    elif benchmark.submitter_id != current_user.id and not current_user.is_admin:
+        raise AppError("forbidden", "Only the benchmark owner can submit new versions", status_code=403)
     versioning_service.validate_semver(version)
     existing = await session.scalar(
         select(BenchmarkVersion).where(
@@ -121,12 +133,23 @@ async def create_version(
     if existing is not None:
         raise AppError("version_exists", "That version already exists", status_code=409)
 
+    artifact_descriptor = validate_upload_file(artifact, authenticated=True, settings=settings)
     stored = await storage_service.upload_upload_file(
-        artifact.filename or "artifact.bin",
+        artifact_descriptor.filename,
         artifact.file,
         directory=f"benchmarks/{benchmark.slug}",
     )
     storage_reference = stored.artifact_url if settings.storage_backend == "local" else stored.storage_key
+    parsed_released_at: datetime | None = None
+    if released_at:
+        try:
+            parsed_released_at = datetime.fromisoformat(released_at)
+        except ValueError as exc:
+            raise AppError(
+                "invalid_release_date",
+                "released_at must be a valid ISO-8601 datetime",
+                status_code=400,
+            ) from exc
     version_record = BenchmarkVersion(
         benchmark_id=benchmark.id,
         version=version,
@@ -142,13 +165,26 @@ async def create_version(
         github_url=github_url,
         metadata_json=_parse_json_field(metadata),
         release_notes=release_notes,
-        released_at=datetime.fromisoformat(released_at) if released_at else None,
-        submitter_id=current_user.id if current_user else None,
+        released_at=parsed_released_at,
+        submitter_id=current_user.id,
         contamination_status="pending",
     )
     versioning_service.apply_citation_string(benchmark, version_record)
     session.add(version_record)
     benchmark.total_versions = benchmark.total_versions + 1
+    await session.flush()
+    await record_audit_event(
+        session,
+        action="version.created",
+        actor=current_user,
+        benchmark=benchmark,
+        version=version_record,
+        resource_type="version",
+        resource_id=str(version_record.id),
+        resource_slug=f"{benchmark.slug}:{version_record.version}",
+        summary=f"Registered version {version_record.version} for {benchmark.slug}",
+        metadata={"artifact_size_bytes": stored.size_bytes, "artifact_sha256": stored.sha256},
+    )
     await session.commit()
     await session.refresh(version_record)
     await session.refresh(benchmark)
@@ -277,3 +313,35 @@ async def get_version_detail(slug: str, version: str, session: SessionDep) -> Ve
     if version_record is None:
         raise AppError("version_not_found", "Version not found", status_code=404)
     return _build_version_detail(benchmark, version_record)
+
+
+@router.get("/{slug}/{version}/activity", response_model=list[AuditEventResponse])
+async def get_version_activity(
+    slug: str,
+    version: str,
+    session: SessionDep,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[AuditEventResponse]:
+    benchmark = await session.scalar(select(Benchmark).where(Benchmark.slug == slug))
+    if benchmark is None:
+        raise AppError("benchmark_not_found", "Benchmark not found", status_code=404)
+    version_record = await session.scalar(
+        select(BenchmarkVersion).where(
+            BenchmarkVersion.benchmark_id == benchmark.id,
+            BenchmarkVersion.version == version,
+        )
+    )
+    if version_record is None:
+        raise AppError("version_not_found", "Version not found", status_code=404)
+    events = list(
+        (
+            await session.scalars(
+                select(AuditEvent)
+                .options(selectinload(AuditEvent.actor))
+                .where(AuditEvent.version_id == version_record.id)
+                .order_by(AuditEvent.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    return [AuditEventResponse.model_validate(item) for item in events]

@@ -69,6 +69,7 @@ class StorageService:
         directory: str,
     ) -> StoredArtifact:
         storage_key = f"{directory}/{uuid4().hex}-{filename}"
+        fileobj.seek(0)
         if self.settings.storage_backend == "local":
             target_path = self.root / storage_key
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,12 +87,20 @@ class StorageService:
                 sha256=hash_state.hexdigest(),
             )
 
-        data = fileobj.read()
-        digest_hex = sha256(data).hexdigest()
-        size_bytes = len(data)
+        def _measure() -> tuple[int, str]:
+            hash_state = sha256()
+            size_bytes = 0
+            fileobj.seek(0)
+            while chunk := fileobj.read(1024 * 1024):
+                size_bytes += len(chunk)
+                hash_state.update(chunk)
+            fileobj.seek(0)
+            return size_bytes, hash_state.hexdigest()
+
+        size_bytes, digest_hex = await asyncio.to_thread(_measure)
 
         def _upload() -> None:
-            self.client.put_object(Bucket=self.settings.storage_bucket, Key=storage_key, Body=data)
+            self.client.upload_fileobj(fileobj, self.settings.storage_bucket, storage_key)
 
         await asyncio.to_thread(_upload)
         return StoredArtifact(

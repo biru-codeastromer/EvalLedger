@@ -3,9 +3,10 @@ import Link from "next/link";
 
 import { ContaminationReport } from "@/components/contamination/ContaminationReport";
 import { OverlapVisualizer } from "@/components/contamination/OverlapVisualizer";
+import { ActivityFeed } from "@/components/ui/ActivityFeed";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { StatusPill } from "@/components/ui/StatusPill";
-import { getContamination, getVersion } from "@/lib/api";
+import { getContamination, getVersion, getVersionActivity } from "@/lib/api";
 
 export default async function VersionPage({
   params
@@ -14,6 +15,7 @@ export default async function VersionPage({
 }) {
   const version = await getVersion(params.slug, params.version);
   const reports = await getContamination(params.slug, params.version);
+  const activity = await getVersionActivity(params.slug, params.version);
 
   return (
     <div className="page-frame section-space">
@@ -69,9 +71,15 @@ export default async function VersionPage({
             <div className="mono mb-3">Verification command</div>
             <CodeBlock code={`evalledger verify ${params.slug} ${params.version}`} />
           </div>
+          <div>
+            <div className="mono mb-3">Audit trail</div>
+            <ActivityFeed
+              events={activity}
+              emptyMessage="No audit events have been recorded for this version yet."
+            />
+          </div>
         </section>
       </div>
     </div>
   );
 }
-

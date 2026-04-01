@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.audit import AuditEvent
     from app.models.benchmark import Benchmark
     from app.models.contamination import ContaminationReport
     from app.models.user import User
@@ -54,6 +55,7 @@ class BenchmarkVersion(Base):
     citations: Mapped[list[Citation]] = relationship(
         back_populates="version", cascade="all, delete-orphan"
     )
+    audit_events: Mapped[list[AuditEvent]] = relationship(back_populates="version")
 
 
 class Citation(Base):

@@ -22,6 +22,13 @@ cd backend && uv run python -m app.scripts.seed
 
 Then open [http://localhost:3000](http://localhost:3000) for the web interface and [http://localhost:8000/docs](http://localhost:8000/docs) for the API.
 
+## Repository guide
+
+- Contributor workflow: `CONTRIBUTING.md`
+- Metadata standard: `standard/METADATA_STANDARD.md`
+- Machine-readable schema: `standard/metadata_schema.json`
+- Maintainer and operations runbooks: `docs/README.md`
+
 ## CLI
 
 ```bash
@@ -57,6 +64,25 @@ The repository ships the human-readable standard in `standard/METADATA_STANDARD.
 ## Contributing code
 
 Use `make dev` for local development, `make migrate` after schema changes, `make seed` to load reference data, `make test` for automated checks, and `make lint` for static analysis.
+
+## Operations
+
+Operational runbooks live in `docs/operations/` and maintainer process notes live in `docs/maintainers/`. They cover incident response, backup and restore drills, release flow, and migration discipline.
+
+## Load testing
+
+Use the local harness below to get a first-pass latency and throughput read on the API:
+
+```bash
+cd backend
+uv run python -m app.scripts.loadtest --url http://localhost:8000/health/live --requests 200 --concurrency 20
+```
+
+The harness reports success rate, throughput, and p50/p95/p99 latency. It is intended for controlled local or staging checks rather than internet-scale benchmarking.
+
+## Product policies
+
+Draft product-facing policy pages ship with the frontend at `/privacy`, `/terms`, and `/acceptable-use`. They are implementation-complete, but they should still receive legal review before a public launch.
 
 ## Roadmap
 

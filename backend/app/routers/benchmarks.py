@@ -4,9 +4,11 @@ from fastapi import APIRouter, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.dependencies import CurrentUser, OptionalUser, SessionDep
+from app.dependencies import CurrentUser, SessionDep
 from app.errors import AppError
+from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
+from app.schemas.audit import AuditEventResponse
 from app.schemas.benchmark import (
     BenchmarkCreate,
     BenchmarkDetail,
@@ -14,6 +16,7 @@ from app.schemas.benchmark import (
     BenchmarkListResponse,
     BenchmarkUpdate,
 )
+from app.services.audit import record_audit_event
 
 router = APIRouter()
 
@@ -81,7 +84,7 @@ async def get_benchmark(slug: str, session: SessionDep) -> BenchmarkDetail:
 async def create_benchmark(
     payload: BenchmarkCreate,
     session: SessionDep,
-    current_user: OptionalUser,
+    current_user: CurrentUser,
 ) -> BenchmarkDetail:
     existing = await session.scalar(select(Benchmark).where(Benchmark.slug == payload.slug))
     if existing is not None:
@@ -93,9 +96,20 @@ async def create_benchmark(
         description=payload.description,
         domain=payload.domain,
         task_type=payload.task_type,
-        submitter_id=current_user.id if current_user else None,
+        submitter_id=current_user.id,
     )
     session.add(benchmark)
+    await session.flush()
+    await record_audit_event(
+        session,
+        action="benchmark.created",
+        actor=current_user,
+        benchmark=benchmark,
+        resource_type="benchmark",
+        resource_id=str(benchmark.id),
+        resource_slug=benchmark.slug,
+        summary=f"Created benchmark {benchmark.slug}",
+    )
     await session.commit()
     await session.refresh(benchmark)
     item = _benchmark_item(benchmark)
@@ -121,7 +135,41 @@ async def update_benchmark(
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(benchmark, field, value)
+    await session.flush()
+    await record_audit_event(
+        session,
+        action="benchmark.updated",
+        actor=current_user,
+        benchmark=benchmark,
+        resource_type="benchmark",
+        resource_id=str(benchmark.id),
+        resource_slug=benchmark.slug,
+        summary=f"Updated benchmark {benchmark.slug}",
+    )
     await session.commit()
     await session.refresh(benchmark)
     item = _benchmark_item(benchmark)
     return BenchmarkDetail(**item.model_dump(), submitter=benchmark.submitter)
+
+
+@router.get("/{slug}/activity", response_model=list[AuditEventResponse])
+async def get_benchmark_activity(
+    slug: str,
+    session: SessionDep,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[AuditEventResponse]:
+    benchmark = await session.scalar(select(Benchmark).where(Benchmark.slug == slug))
+    if benchmark is None:
+        raise AppError("benchmark_not_found", "Benchmark not found", status_code=404)
+    events = list(
+        (
+            await session.scalars(
+                select(AuditEvent)
+                .options(selectinload(AuditEvent.actor))
+                .where(AuditEvent.benchmark_id == benchmark.id)
+                .order_by(AuditEvent.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+    )
+    return [AuditEventResponse.model_validate(item) for item in events]

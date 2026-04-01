@@ -3,12 +3,14 @@ import Link from "next/link";
 import { CitationBlock } from "@/components/registry/CitationBlock";
 import { ContaminationBadge } from "@/components/registry/ContaminationBadge";
 import { VersionBadge } from "@/components/registry/VersionBadge";
-import { getBenchmark, getVersion, getVersions } from "@/lib/api";
+import { ActivityFeed } from "@/components/ui/ActivityFeed";
+import { getBenchmark, getBenchmarkActivity, getVersion, getVersions } from "@/lib/api";
 
 export default async function BenchmarkDetailPage({ params }: { params: { slug: string } }) {
   const benchmark = await getBenchmark(params.slug);
   const versions = await getVersions(params.slug);
   const latest = versions[0] ? await getVersion(params.slug, versions[0].version) : null;
+  const activity = await getBenchmarkActivity(params.slug);
 
   return (
     <div className="page-frame section-space">
@@ -68,10 +70,16 @@ export default async function BenchmarkDetailPage({ params }: { params: { slug: 
               </tbody>
             </table>
           </div>
+          <div className="mt-12 space-y-4">
+            <div className="mono">Audit trail</div>
+            <ActivityFeed
+              events={activity}
+              emptyMessage="No public audit events have been recorded for this benchmark yet."
+            />
+          </div>
         </section>
         {latest ? <CitationBlock citations={latest.citations} /> : null}
       </div>
     </div>
   );
 }
-

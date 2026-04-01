@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: dev migrate seed test lint
+.PHONY: dev migrate seed test lint loadtest verify
 
 dev:
 	docker compose up --build
@@ -21,3 +21,8 @@ lint:
 	cd cli && uv run ruff check . && uv run mypy evalledger
 	cd frontend && pnpm lint && pnpm typecheck
 
+loadtest:
+	cd backend && uv run python -m app.scripts.loadtest --url http://localhost:8000/health/live --requests 200 --concurrency 20
+
+verify: lint test
+	cd frontend && pnpm build

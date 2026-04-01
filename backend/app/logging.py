@@ -12,7 +12,7 @@ def configure_logging() -> None:
             "formatters": {
                 "json": {
                     "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
-                    "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s",
+                    "fmt": "%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s",
                 }
             },
             "handlers": {
@@ -28,4 +28,3 @@ def configure_logging() -> None:
 
 
 logger = logging.getLogger("evalledger")
-

@@ -1,11 +1,12 @@
 import Image from "next/image";
+import type { Route } from "next";
 import Link from "next/link";
 
 export function Footer() {
   return (
     <footer className="ui-copy border-t" style={{ borderColor: "var(--border)" }}>
       <div className="page-frame py-12">
-        <div className="grid gap-12 md:grid-cols-3">
+        <div className="grid gap-12 md:grid-cols-4">
           <div>
             <p className="mono mb-4">About EvalLedger</p>
             <p className="max-w-sm text-[15px] text-[var(--text-dim)]">
@@ -28,13 +29,21 @@ export function Footer() {
             </div>
           </div>
           <div>
-            <p className="mono mb-4">Standard</p>
+            <p className="mono mb-4">Documentation</p>
             <div className="space-y-2 text-[15px] text-[var(--text-dim)]">
               <Link href="/standard" className="block">
                 Metadata Standard
               </Link>
-              <a href="/docs" className="block">
+              <Link href="/docs" className="block">
                 Documentation
+              </Link>
+              <a
+                href="https://github.com/biru-codeastromer/EvalLedger/blob/main/docs/README.md"
+                target="_blank"
+                rel="noreferrer"
+                className="block"
+              >
+                Runbooks
               </a>
               <a
                 href="https://github.com/biru-codeastromer/EvalLedger"
@@ -44,6 +53,20 @@ export function Footer() {
               >
                 GitHub
               </a>
+            </div>
+          </div>
+          <div>
+            <p className="mono mb-4">Policies</p>
+            <div className="space-y-2 text-[15px] text-[var(--text-dim)]">
+              <Link href={"/privacy" as Route} className="block">
+                Privacy
+              </Link>
+              <Link href={"/terms" as Route} className="block">
+                Terms
+              </Link>
+              <Link href={"/acceptable-use" as Route} className="block">
+                Acceptable use
+              </Link>
             </div>
           </div>
         </div>
@@ -61,6 +84,11 @@ export function Footer() {
               />
             </div>
             <span className="mono">Copyright 2026 EvalLedger</span>
+          </div>
+          <div className="flex flex-wrap gap-4 text-[14px] text-[var(--text-dim)]">
+            <Link href={"/privacy" as Route}>Privacy</Link>
+            <Link href={"/terms" as Route}>Terms</Link>
+            <Link href={"/acceptable-use" as Route}>Acceptable Use</Link>
           </div>
         </div>
       </div>

@@ -1,24 +1,17 @@
 "use client";
 
+import type { Route } from "next";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-import { loginUser, registerUser } from "@/lib/api";
+import { APIError, loginUser, registerUser } from "@/lib/api";
 import { AuthResponse } from "@/lib/types";
+import { saveSession } from "@/lib/session";
 
 type Mode = "login" | "register";
 
-function persistSession(payload: AuthResponse): void {
-  window.localStorage.setItem(
-    "evalledger.session",
-    JSON.stringify({
-      access_token: payload.access_token,
-      token_type: payload.token_type,
-      user: payload.user
-    })
-  );
-}
-
 export default function LoginPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,9 +30,14 @@ export default function LoginPage() {
         mode === "login"
           ? await loginUser({ email, password })
           : await registerUser({ email, password, username, display_name: displayName });
-      persistSession(payload);
+      saveSession(payload);
       setSession(payload);
-    } catch {
+      router.push((payload.user.is_admin ? "/review" : "/account") as Route);
+    } catch (caughtError) {
+      if (caughtError instanceof APIError) {
+        setError(caughtError.message);
+        return;
+      }
       setError(
         "We could not complete that request. If the backend is not running yet, start the API or point NEXT_PUBLIC_API_URL at the deployed service."
       );
@@ -145,8 +143,8 @@ export default function LoginPage() {
               <div className="mono mb-3">Session ready</div>
               <div className="ui-copy text-[18px] font-medium text-[var(--text)]">{session.user.username}</div>
               <p className="body-copy mt-2">
-                The access token is stored in local storage for this browser session. You can now use
-                the same account for API keys and protected submissions.
+                The access token is stored in local storage for this browser session. You can now manage
+                API keys, protected submissions, and review access from your account workspace.
               </p>
             </div>
           ) : null}

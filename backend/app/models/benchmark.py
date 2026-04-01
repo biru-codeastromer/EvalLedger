@@ -12,6 +12,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.audit import AuditEvent
     from app.models.user import User
     from app.models.version import BenchmarkVersion
 
@@ -39,4 +40,4 @@ class Benchmark(Base):
     versions: Mapped[list[BenchmarkVersion]] = relationship(
         back_populates="benchmark", cascade="all, delete-orphan", order_by="BenchmarkVersion.created_at.desc()"
     )
-
+    audit_events: Mapped[list[AuditEvent]] = relationship(back_populates="benchmark")

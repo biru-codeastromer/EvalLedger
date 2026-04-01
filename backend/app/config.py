@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60 * 24
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    admin_emails: list[str] = Field(default_factory=list)
     storage_backend: Literal["local", "s3"] = "local"
     storage_root: str = "storage"
     storage_bucket: str = "evalledger-artifacts"
@@ -34,6 +35,10 @@ class Settings(BaseSettings):
     storage_s3_region: str = "us-east-1"
     storage_s3_presign_endpoint: str | None = None
     max_public_upload_bytes: int = 10 * 1024 * 1024
+    max_authenticated_upload_bytes: int = 250 * 1024 * 1024
+    allowed_artifact_extensions: list[str] = Field(
+        default_factory=lambda: [".json", ".jsonl", ".csv", ".parquet"]
+    )
     contamination_default_threshold: float = 0.8
     contamination_num_perm: int = 128
 
@@ -41,4 +46,3 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

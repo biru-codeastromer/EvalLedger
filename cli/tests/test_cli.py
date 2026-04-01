@@ -49,3 +49,42 @@ def test_verify_command(monkeypatch) -> None:
     assert result.exit_code == 0
     assert "VERIFIED" in result.stdout
 
+
+def test_login_command_saves_credentials(monkeypatch) -> None:
+    saved = {}
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def login(self, _email: str, _password: str):
+            return {"access_token": "token-123"}
+
+        def create_api_key(self, _name: str):
+            return {"api_key": "el_key_123"}
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("evalledger.commands.login.EvalLedgerClient", FakeClient)
+    monkeypatch.setattr("evalledger.commands.login.Prompt.ask", lambda *_args, **_kwargs: "evalledger-cli")
+    monkeypatch.setattr(
+        "evalledger.commands.login.save_config",
+        lambda config: saved.update(
+            {
+                "endpoint": config.endpoint,
+                "email": config.email,
+                "access_token": config.access_token,
+                "api_key": config.api_key,
+            }
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["login", "--email", "researcher@example.com", "--password", "password123"],
+    )
+
+    assert result.exit_code == 0
+    assert saved["email"] == "researcher@example.com"
+    assert saved["api_key"] == "el_key_123"

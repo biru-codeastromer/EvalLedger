@@ -70,5 +70,12 @@ async def get_optional_user(
         return None
 
 
+async def get_admin_user(current_user: Annotated[User, Depends(get_current_user)]) -> User:
+    if not current_user.is_admin:
+        raise AppError("forbidden", "Administrator access is required", status_code=403)
+    return current_user
+
+
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+AdminUser = Annotated[User, Depends(get_admin_user)]

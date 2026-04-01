@@ -1,10 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import { CodeBlock } from "@/components/ui/CodeBlock";
-import { createBenchmark, submitBenchmark } from "@/lib/api";
+import { APIError, createBenchmark, submitBenchmark } from "@/lib/api";
+import { loadSession, subscribeToSessionChange } from "@/lib/session";
+import { AuthResponse } from "@/lib/types";
 
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -42,6 +45,13 @@ export default function SubmitPage() {
   const [submittedId, setSubmittedId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [session, setSession] = useState<AuthResponse | null>(null);
+
+  useEffect(() => {
+    const sync = () => setSession(loadSession());
+    sync();
+    return subscribeToSessionChange(sync);
+  }, []);
 
   useEffect(() => {
     if (!slug) {
@@ -75,6 +85,12 @@ export default function SubmitPage() {
     setSubmitting(true);
     setError(null);
     setProgress(20);
+    if (!session) {
+      setSubmitting(false);
+      setProgress(0);
+      setError("Sign in before creating registry records or uploading benchmark artifacts.");
+      return;
+    }
     try {
       await createBenchmark({
         name,
@@ -83,8 +99,13 @@ export default function SubmitPage() {
         domain: [domain],
         task_type: taskType
       });
-    } catch {
-      // Existing benchmarks can proceed directly to version submission.
+    } catch (caughtError) {
+      if (!(caughtError instanceof APIError) || caughtError.status !== 409) {
+        setSubmitting(false);
+        setProgress(0);
+        setError(caughtError instanceof APIError ? caughtError.message : "Could not create the benchmark record.");
+        return;
+      }
     }
     try {
       setProgress(55);
@@ -99,9 +120,13 @@ export default function SubmitPage() {
       const response = await submitBenchmark(formData);
       setProgress(100);
       setSubmittedId(response.canonical_id);
-    } catch {
+    } catch (caughtError) {
       setProgress(0);
-      setError("Submission failed. Check that the API is available and the version string is valid.");
+      setError(
+        caughtError instanceof APIError
+          ? caughtError.message
+          : "Submission failed. Check that the API is available and the version string is valid."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -114,6 +139,14 @@ export default function SubmitPage() {
       </div>
       <div className="page-frame section-space relative">
         <div className="mb-8 mono">Step {step} of 3</div>
+        {!session ? (
+          <div className="mb-8 rounded-sm border p-4 text-[15px] text-[var(--text-dim)]" style={{ borderColor: "var(--border)" }}>
+            Sign in to claim benchmark ownership, upload artifacts, and generate durable provenance records.
+            <Link href="/login" className="ml-2 text-[var(--text)] underline">
+              Go to sign in
+            </Link>
+          </div>
+        ) : null}
         <div className="grid gap-10 md:grid-cols-[minmax(0,1fr)_320px]">
           <form className="space-y-8" onSubmit={handleSubmit}>
             {step === 1 ? (
@@ -186,7 +219,7 @@ export default function SubmitPage() {
                   <button type="button" className="btn-secondary" onClick={() => setStep(2)}>
                     Back
                   </button>
-                  <button type="submit" className="btn-primary" disabled={submitting || !canAdvanceStepTwo}>
+                  <button type="submit" className="btn-primary" disabled={submitting || !canAdvanceStepTwo || !session}>
                     {submitting ? "Submitting..." : "Submit"}
                   </button>
                 </div>

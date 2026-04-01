@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated
 
@@ -19,6 +20,7 @@ from app.schemas.contamination import (
 )
 from app.services.storage import StorageService
 from app.tasks.contamination_tasks import celery_app, run_contamination_check
+from app.utils.uploads import validate_upload_file
 
 router = APIRouter()
 settings = get_settings()
@@ -29,7 +31,10 @@ def _parse_corpus_ids(raw_value: str | None) -> list[str]:
     if not raw_value:
         return []
     if raw_value.startswith("["):
-        parsed = json.loads(raw_value)
+        try:
+            parsed = json.loads(raw_value)
+        except JSONDecodeError as exc:
+            raise AppError("invalid_corpora", "corpus_ids must be a valid JSON list", status_code=400) from exc
         if not isinstance(parsed, list):
             raise AppError("invalid_corpora", "corpus_ids must be a list of UUIDs", status_code=400)
         return [str(item) for item in parsed]
@@ -55,13 +60,8 @@ async def run_check(
     corpus_ids: Annotated[str | None, Form()] = None,
     current_user: OptionalUser = None,
 ) -> ContaminationCheckResponse:
+    artifact_descriptor = validate_upload_file(artifact, authenticated=current_user is not None, settings=settings)
     file_bytes = await artifact.read()
-    if len(file_bytes) > settings.max_public_upload_bytes and current_user is None:
-        raise AppError(
-            "auth_required",
-            "Authentication is required for uploads larger than 10MB",
-            status_code=401,
-        )
     selected_ids = _parse_corpus_ids(corpus_ids)
     if not selected_ids:
         selected_ids = [
@@ -73,13 +73,13 @@ async def run_check(
             ).all()
         ]
     stored = await storage_service.upload_bytes(
-        artifact.filename or "check.bin",
+        artifact_descriptor.filename,
         file_bytes,
         directory="checks/adhoc",
     )
     storage_reference = stored.artifact_url if settings.storage_backend == "local" else stored.storage_key
     task = run_contamination_check.delay(
-        artifact.filename or Path(storage_reference).name,
+        artifact_descriptor.filename or Path(storage_reference).name,
         storage_reference,
         selected_ids,
         None,
@@ -87,7 +87,7 @@ async def run_check(
     return ContaminationCheckResponse(
         job_id=task.id,
         status="queued",
-        filename=artifact.filename or "artifact",
+        filename=artifact_descriptor.filename,
         corpus_ids=selected_ids,
     )
 

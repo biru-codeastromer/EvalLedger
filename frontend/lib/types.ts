@@ -105,11 +105,60 @@ export interface AuthUser {
   username: string;
   display_name?: string | null;
   affiliation?: string | null;
-  is_verified?: boolean;
+  is_verified: boolean;
+  is_admin: boolean;
 }
 
 export interface AuthResponse {
   access_token: string;
   token_type: string;
   user: AuthUser;
+}
+
+export interface APIKeyMetadata {
+  id: string;
+  name: string | null;
+  last_used_at: string | null;
+  created_at: string;
+  is_active: boolean;
+}
+
+export interface OwnedBenchmark {
+  id: string;
+  slug: string;
+  name: string;
+  total_versions: number;
+  is_verified: boolean;
+  updated_at: string;
+}
+
+export interface AuditActor {
+  id: string;
+  username: string;
+  display_name?: string | null;
+  affiliation?: string | null;
+  is_verified: boolean;
+}
+
+export interface AuditEvent {
+  id: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  resource_slug: string | null;
+  summary: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  actor: AuditActor | null;
+}
+
+export interface MeResponse {
+  user: AuthUser;
+  api_keys: APIKeyMetadata[];
+  benchmarks: OwnedBenchmark[];
+  recent_activity: AuditEvent[];
+}
+
+export interface BenchmarkVerificationResponse {
+  benchmark: BenchmarkDetail;
 }
