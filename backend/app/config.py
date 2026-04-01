@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,28 @@ class Settings(BaseSettings):
     )
     contamination_default_threshold: float = 0.8
     contamination_num_perm: int = 128
+
+    @model_validator(mode="after")
+    def _normalise_database_urls(self) -> Settings:
+        """Render supplies ``postgres://`` URLs; rewrite them to the
+        driver-specific schemes that SQLAlchemy expects."""
+        if self.database_url.startswith("postgres://"):
+            self.database_url = self.database_url.replace(
+                "postgres://", "postgresql+asyncpg://", 1
+            )
+        elif self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+        if self.sync_database_url.startswith("postgres://"):
+            self.sync_database_url = self.sync_database_url.replace(
+                "postgres://", "postgresql+psycopg://", 1
+            )
+        elif self.sync_database_url.startswith("postgresql://"):
+            self.sync_database_url = self.sync_database_url.replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
+        return self
 
 
 @lru_cache(maxsize=1)

@@ -16,9 +16,10 @@ COPY pyproject.toml /app/pyproject.toml
 RUN pip install --no-cache-dir uv && uv sync --no-dev
 
 COPY . /app
-RUN uv sync --no-dev
+RUN uv sync --no-dev && chmod +x bin/docker-entrypoint.sh
 
 EXPOSE 8000
 
+ENTRYPOINT ["bin/docker-entrypoint.sh"]
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
