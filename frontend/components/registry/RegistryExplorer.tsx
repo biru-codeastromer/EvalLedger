@@ -30,15 +30,17 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
   return (
     <div className="page-frame section-space">
       <div className="mb-8 overflow-hidden rounded-sm border" style={{ borderColor: "var(--border)" }}>
-        <div className="relative h-[240px]">
+        <div className="relative min-h-[320px] md:min-h-[360px]">
           <Image src="/images/13-aerial-grid.jpg" alt="Registry hero banner" fill className="editorial-image" />
           <div className="absolute inset-0 bg-[rgba(245,243,238,0.56)]" />
-          <div className="absolute inset-0 flex items-end justify-between gap-8 px-8 py-8">
-            <div>
+          <div className="absolute inset-0 grid gap-8 px-8 py-8 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] md:items-end">
+            <div className="self-end">
               <div className="mono mb-3">Registry</div>
-              <h1 className="display-lg max-w-xl">Versioned benchmark records with provenance you can cite.</h1>
+              <h1 className="display-lg max-w-[11ch] text-[clamp(2.75rem,5vw,4.4rem)]">
+                Versioned benchmark records with provenance you can cite.
+              </h1>
             </div>
-            <p className="max-w-sm text-[16px] text-[var(--text-dim)]">
+            <p className="max-w-sm self-end text-[16px] leading-8 text-[var(--text-dim)]">
               Filter by domain, search by title, and inspect the latest pinned version without losing context.
             </p>
           </div>
@@ -130,4 +132,3 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
     </div>
   );
 }
-
