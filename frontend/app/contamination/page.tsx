@@ -15,25 +15,44 @@ export default function ContaminationPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState<ContaminationReport[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit() {
     if (!file) {
       return;
     }
     setLoading(true);
-    const formData = new FormData();
-    formData.append("artifact", file);
-    formData.append("corpus_ids", JSON.stringify(selected));
-    const job = await runAdHocCheck(formData);
-    const interval = window.setInterval(async () => {
-      const status = await getJob(job.job_id);
-      if (status.status === "completed") {
-        const result = status.result as { corpora: ContaminationReport[] };
-        setReports(result.corpora);
-        setLoading(false);
-        window.clearInterval(interval);
-      }
-    }, 1000);
+    setError(null);
+    setReports([]);
+    try {
+      const formData = new FormData();
+      formData.append("artifact", file);
+      formData.append("corpus_ids", JSON.stringify(selected));
+      const job = await runAdHocCheck(formData);
+      const interval = window.setInterval(async () => {
+        try {
+          const status = await getJob(job.job_id);
+          if (status.status === "completed") {
+            const result = status.result as { corpora: ContaminationReport[] };
+            setReports(result.corpora);
+            setLoading(false);
+            window.clearInterval(interval);
+          }
+          if (status.status === "failed") {
+            setError("The contamination job failed before results were returned.");
+            setLoading(false);
+            window.clearInterval(interval);
+          }
+        } catch {
+          setError("We could not refresh the contamination job status.");
+          setLoading(false);
+          window.clearInterval(interval);
+        }
+      }, 1000);
+    } catch {
+      setLoading(false);
+      setError("We could not start the contamination check. Confirm the API is reachable and try again.");
+    }
   }
 
   return (
@@ -87,9 +106,17 @@ export default function ContaminationPage() {
                 ))}
               </div>
             </div>
-            <button type="button" className="btn-primary mt-8" onClick={handleSubmit} disabled={loading}>
+            <button
+              type="button"
+              className="btn-primary mt-8"
+              onClick={handleSubmit}
+              disabled={loading || file === null}
+            >
               {loading ? "Running..." : "Run Check"}
             </button>
+            {error ? (
+              <p className="ui-copy mt-4 text-[14px] text-[var(--status-contaminated)]">{error}</p>
+            ) : null}
           </section>
           <aside className="space-y-6">
             <div className="relative h-[280px] overflow-hidden rounded-sm border" style={{ borderColor: "var(--border)" }}>
@@ -107,4 +134,3 @@ export default function ContaminationPage() {
     </div>
   );
 }
-

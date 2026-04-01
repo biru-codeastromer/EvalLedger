@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Mono, DM_Sans, Instrument_Serif } from "next/font/google";
+import localFont from "next/font/local";
 
 import { Footer } from "@/components/layout/Footer";
 import { Nav } from "@/components/layout/Nav";
@@ -7,22 +7,55 @@ import { Providers } from "@/components/layout/Providers";
 
 import "@/styles/globals.css";
 
-const instrumentSerif = Instrument_Serif({
-  subsets: ["latin"],
-  weight: "400",
-  variable: "--font-instrument-serif"
+const anthropicSans = localFont({
+  src: [
+    {
+      path: "../public/fonts/anthropic-sans-roman.woff2",
+      style: "normal",
+      weight: "300 800"
+    },
+    {
+      path: "../public/fonts/anthropic-sans-italic.woff2",
+      style: "italic",
+      weight: "300 800"
+    }
+  ],
+  variable: "--font-anthropic-sans",
+  display: "swap"
 });
 
-const dmSans = DM_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  variable: "--font-dm-sans"
+const anthropicSerif = localFont({
+  src: [
+    {
+      path: "../public/fonts/anthropic-serif-roman.woff2",
+      style: "normal",
+      weight: "300 800"
+    },
+    {
+      path: "../public/fonts/anthropic-serif-italic.woff2",
+      style: "italic",
+      weight: "300 800"
+    }
+  ],
+  variable: "--font-anthropic-serif",
+  display: "swap"
 });
 
-const dmMono = DM_Mono({
-  subsets: ["latin"],
-  weight: ["300", "400", "500"],
-  variable: "--font-dm-mono"
+const anthropicMono = localFont({
+  src: [
+    {
+      path: "../public/fonts/anthropic-mono-roman.woff2",
+      style: "normal",
+      weight: "300 800"
+    },
+    {
+      path: "../public/fonts/anthropic-mono-italic.woff2",
+      style: "italic",
+      weight: "300 800"
+    }
+  ],
+  variable: "--font-anthropic-mono",
+  display: "swap"
 });
 
 export const metadata: Metadata = {
@@ -33,7 +66,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={`${instrumentSerif.variable} ${dmSans.variable} ${dmMono.variable} site-shell`}>
+      <body
+        className={`${anthropicSans.variable} ${anthropicSerif.variable} ${anthropicMono.variable} site-shell`}
+      >
         <Providers>
           <Nav />
           <main>{children}</main>
@@ -43,4 +78,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

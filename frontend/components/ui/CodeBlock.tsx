@@ -6,9 +6,13 @@ export function CodeBlock({ code, inline = false }: { code: string; inline?: boo
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1200);
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
   }
 
   if (inline) {
@@ -18,6 +22,7 @@ export function CodeBlock({ code, inline = false }: { code: string; inline?: boo
         onClick={handleCopy}
         className="rounded-sm border px-4 py-3 text-left font-[var(--font-mono)] text-[13px]"
         style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}
+        aria-label={`Copy ${code}`}
       >
         {copied ? "Copied" : code}
       </button>
@@ -29,7 +34,8 @@ export function CodeBlock({ code, inline = false }: { code: string; inline?: boo
       <button
         type="button"
         onClick={handleCopy}
-        className="absolute right-3 top-3 text-[12px] text-[var(--muted)]"
+        className="absolute right-3 top-3 font-[var(--font-ui)] text-[12px] text-[var(--muted)]"
+        aria-label="Copy code block"
       >
         {copied ? "Copied" : "Copy"}
       </button>
@@ -39,4 +45,3 @@ export function CodeBlock({ code, inline = false }: { code: string; inline?: boo
     </div>
   );
 }
-

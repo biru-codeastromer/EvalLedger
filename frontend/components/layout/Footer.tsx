@@ -3,7 +3,7 @@ import Link from "next/link";
 
 export function Footer() {
   return (
-    <footer className="border-t" style={{ borderColor: "var(--border)" }}>
+    <footer className="ui-copy border-t" style={{ borderColor: "var(--border)" }}>
       <div className="page-frame py-12">
         <div className="grid gap-12 md:grid-cols-3">
           <div>
@@ -33,7 +33,15 @@ export function Footer() {
               <Link href="/standard" className="block">
                 Metadata Standard
               </Link>
-              <a href="https://github.com" target="_blank" rel="noreferrer" className="block">
+              <a href="/docs" className="block">
+                Documentation
+              </a>
+              <a
+                href="https://github.com/biru-codeastromer/EvalLedger"
+                target="_blank"
+                rel="noreferrer"
+                className="block"
+              >
                 GitHub
               </a>
             </div>
@@ -59,4 +67,3 @@ export function Footer() {
     </footer>
   );
 }
-

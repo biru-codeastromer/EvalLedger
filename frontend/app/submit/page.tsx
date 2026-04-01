@@ -6,6 +6,8 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CodeBlock } from "@/components/ui/CodeBlock";
 import { createBenchmark, submitBenchmark } from "@/lib/api";
 
+const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
 function slugify(input: string): string {
   return input
     .toLowerCase()
@@ -38,6 +40,8 @@ export default function SubmitPage() {
   const [sha, setSha] = useState("");
   const [progress, setProgress] = useState(0);
   const [submittedId, setSubmittedId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug) {
@@ -59,11 +63,17 @@ export default function SubmitPage() {
     [domain, file?.name, license, name, slug, taskType, version]
   );
 
+  const canAdvanceStepOne = name.trim().length > 0 && slug.trim().length > 0 && description.trim().length >= 20;
+  const hasValidSemver = SEMVER_PATTERN.test(version.trim());
+  const canAdvanceStepTwo = hasValidSemver && file !== null;
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!file) {
+    if (!file || !canAdvanceStepTwo) {
       return;
     }
+    setSubmitting(true);
+    setError(null);
     setProgress(20);
     try {
       await createBenchmark({
@@ -76,18 +86,25 @@ export default function SubmitPage() {
     } catch {
       // Existing benchmarks can proceed directly to version submission.
     }
-    setProgress(55);
-    const formData = new FormData();
-    formData.append("artifact", file);
-    formData.append("slug", slug);
-    formData.append("version", version);
-    formData.append("license", license);
-    formData.append("paper_url", paperUrl);
-    formData.append("github_url", githubUrl);
-    formData.append("release_notes", releaseNotes);
-    const response = await submitBenchmark(formData);
-    setProgress(100);
-    setSubmittedId(response.canonical_id);
+    try {
+      setProgress(55);
+      const formData = new FormData();
+      formData.append("artifact", file);
+      formData.append("slug", slug);
+      formData.append("version", version);
+      formData.append("license", license);
+      formData.append("paper_url", paperUrl);
+      formData.append("github_url", githubUrl);
+      formData.append("release_notes", releaseNotes);
+      const response = await submitBenchmark(formData);
+      setProgress(100);
+      setSubmittedId(response.canonical_id);
+    } catch {
+      setProgress(0);
+      setError("Submission failed. Check that the API is available and the version string is valid.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -109,7 +126,12 @@ export default function SubmitPage() {
                   <input value={domain} onChange={(event) => setDomain(event.target.value)} placeholder="Domain" className="w-full rounded-sm border px-4 py-4" style={{ borderColor: "var(--border)", background: "var(--bg)" }} />
                   <input value={taskType} onChange={(event) => setTaskType(event.target.value)} placeholder="Task type" className="w-full rounded-sm border px-4 py-4" style={{ borderColor: "var(--border)", background: "var(--bg)" }} />
                 </div>
-                <button type="button" className="btn-primary" onClick={() => setStep(2)}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => setStep(2)}
+                  disabled={!canAdvanceStepOne}
+                >
                   Continue
                 </button>
               </>
@@ -131,10 +153,20 @@ export default function SubmitPage() {
                   <button type="button" className="btn-secondary" onClick={() => setStep(1)}>
                     Back
                   </button>
-                  <button type="button" className="btn-primary" onClick={() => setStep(3)}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => setStep(3)}
+                    disabled={!canAdvanceStepTwo}
+                  >
                     Continue
                   </button>
                 </div>
+                {!hasValidSemver && version.trim().length > 0 ? (
+                  <p className="ui-copy text-[14px] text-[var(--status-contaminated)]">
+                    Version must follow semantic versioning like 1.0.0.
+                  </p>
+                ) : null}
               </>
             ) : null}
 
@@ -154,10 +186,13 @@ export default function SubmitPage() {
                   <button type="button" className="btn-secondary" onClick={() => setStep(2)}>
                     Back
                   </button>
-                  <button type="submit" className="btn-primary">
-                    Submit
+                  <button type="submit" className="btn-primary" disabled={submitting || !canAdvanceStepTwo}>
+                    {submitting ? "Submitting..." : "Submit"}
                   </button>
                 </div>
+                {error ? (
+                  <p className="ui-copy text-[14px] text-[var(--status-contaminated)]">{error}</p>
+                ) : null}
                 {submittedId ? (
                   <div className="space-y-4">
                     <div className="surface rounded-sm p-6">
@@ -175,4 +210,3 @@ export default function SubmitPage() {
     </div>
   );
 }
-

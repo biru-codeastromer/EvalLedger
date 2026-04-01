@@ -1,4 +1,5 @@
 import {
+  AuthResponse,
   BenchmarkDetail,
   BenchmarkListItem,
   ContaminationReport,
@@ -111,3 +112,31 @@ export async function getJob(jobId: string): Promise<{
   return fetchJSON<{ status: string; result?: unknown }>(`/contamination/jobs/${jobId}`, undefined, true);
 }
 
+export async function loginUser(payload: { email: string; password: string }): Promise<AuthResponse> {
+  const response = await fetch(`${getBaseUrl(true)}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(`Sign-in failed: ${response.status}`);
+  }
+  return (await response.json()) as AuthResponse;
+}
+
+export async function registerUser(payload: {
+  email: string;
+  username: string;
+  password: string;
+  display_name?: string;
+}): Promise<AuthResponse> {
+  const response = await fetch(`${getBaseUrl(true)}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(`Registration failed: ${response.status}`);
+  }
+  return (await response.json()) as AuthResponse;
+}

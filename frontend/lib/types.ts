@@ -99,3 +99,17 @@ export interface ContaminationReport {
   created_at: string;
 }
 
+export interface AuthUser {
+  id: string;
+  email: string;
+  username: string;
+  display_name?: string | null;
+  affiliation?: string | null;
+  is_verified?: boolean;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: string;
+  user: AuthUser;
+}

@@ -3,7 +3,7 @@ import Link from "next/link";
 export function Nav() {
   return (
     <header
-      className="sticky top-0 z-40 border-b bg-[var(--bg)]"
+      className="ui-copy sticky top-0 z-40 border-b bg-[var(--bg)]"
       style={{ borderColor: "var(--border)" }}
     >
       <div className="page-frame flex items-center justify-between gap-6 py-4">
@@ -14,14 +14,14 @@ export function Nav() {
           <Link href="/registry">Registry</Link>
           <Link href="/contamination">Contamination</Link>
           <Link href="/standard">Standard</Link>
-          <a href="https://github.com" target="_blank" rel="noreferrer">
+          <a href="/docs">
             Docs
           </a>
         </nav>
         <div className="flex items-center gap-3">
-          <Link href="/submit" className="text-[14px] text-[var(--text-dim)]">
+          <a href="/login" className="text-[14px] text-[var(--text-dim)]">
             Sign In
-          </Link>
+          </a>
           <Link href="/submit" className="btn-primary">
             Submit Benchmark
           </Link>
@@ -30,4 +30,3 @@ export function Nav() {
     </header>
   );
 }
-
