@@ -112,8 +112,8 @@ fly secrets set \
 ```bash
 fly secrets set \
   APP_URL="https://evalledger.fly.dev" \
-  FRONTEND_URL="https://eval-ledger.vercel.app" \
-  CORS_ORIGINS='["https://eval-ledger.vercel.app"]' \
+  FRONTEND_URL="https://evalledger-frontend.vercel.app" \
+  CORS_ORIGINS='["https://evalledger-frontend.vercel.app"]' \
   JWT_SECRET_KEY="$(openssl rand -hex 32)" \
   --app evalledger
 ```
@@ -161,8 +161,8 @@ fly ssh console --app evalledger --command "uv run python -m app.scripts.seed"
 | `CELERY_RESULT_BACKEND` | Same as `REDIS_URL` |
 | `JWT_SECRET_KEY` | 64-char random string; generate with `openssl rand -hex 32` |
 | `APP_URL` | Public Fly.io API URL, e.g. `https://evalledger.fly.dev` |
-| `FRONTEND_URL` | Vercel deployment URL, e.g. `https://eval-ledger.vercel.app` |
-| `CORS_ORIGINS` | JSON array, e.g. `["https://eval-ledger.vercel.app"]` |
+| `FRONTEND_URL` | Vercel deployment URL, e.g. `https://evalledger-frontend.vercel.app` |
+| `CORS_ORIGINS` | JSON array, e.g. `["https://evalledger-frontend.vercel.app"]` |
 | `STORAGE_BUCKET` | Tigris bucket name |
 | `STORAGE_S3_ENDPOINT_URL` | Tigris S3 endpoint URL |
 | `STORAGE_S3_ACCESS_KEY_ID` | Tigris access key |
