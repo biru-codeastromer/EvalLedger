@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
   && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml /app/pyproject.toml
-RUN pip install --no-cache-dir uv && uv sync --no-dev
+COPY pyproject.toml uv.lock README.md /app/
+RUN pip install --no-cache-dir uv && uv sync --no-dev --frozen
 
 COPY . /app
 RUN uv sync --no-dev && chmod +x bin/docker-entrypoint.sh
