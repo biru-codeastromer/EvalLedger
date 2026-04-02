@@ -1,0 +1,21 @@
+# Vercel
+.vercel
+
+# Next.js
+.next/
+
+# Dependencies
+node_modules/
+
+# Environment (real env files — examples are safe)
+.env
+.env.*
+!.env.example
+
+# Testing
+coverage/
+playwright-report/
+test-results/
+
+# Build
+*.tsbuildinfo

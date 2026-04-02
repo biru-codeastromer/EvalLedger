@@ -1,18 +1,36 @@
+# OS artifacts
 .DS_Store
+Thumbs.db
+
+# Environment / secrets — never commit real env files
 .env
-.env.local
-.env.production.local
-.venv
+.env.*
+!.env.example
+
+# Python
+.venv/
 __pycache__/
+*.pyc
+*.pyo
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
 dist/
 build/
+*.egg-info/
+
+# Node / frontend
 node_modules/
 .next/
+.vercel/
 coverage/
-htmlcov/
+*.tsbuildinfo
+playwright-report/
+test-results/
+
+# Backend-specific
 backend/.venv/
 backend/.pytest_cache/
 backend/.mypy_cache/
@@ -20,13 +38,20 @@ backend/.ruff_cache/
 backend/.coverage
 backend/storage/
 backend/alembic/__pycache__/
+
+# Frontend-specific
 frontend/.next/
 frontend/.vercel/
 frontend/node_modules/
 frontend/playwright-report/
 frontend/test-results/
 frontend/coverage/
-frontend/tsconfig.tsbuildinfo
+
+# CLI
 cli/.venv/
-*.pyc
-*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
