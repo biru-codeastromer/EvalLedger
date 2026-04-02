@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     max_public_upload_bytes: int = 10 * 1024 * 1024
     max_authenticated_upload_bytes: int = 250 * 1024 * 1024
     allowed_artifact_extensions: list[str] = Field(default_factory=lambda: [".json", ".jsonl", ".csv", ".parquet"])
+    # OAuth — GitHub
+    # Register an OAuth App at https://github.com/settings/developers
+    # Callback URL: {APP_URL}/auth/oauth/github/callback
+    github_client_id: str = ""
+    github_client_secret: str = ""
+
+    # OAuth — Google
+    # Register credentials at https://console.cloud.google.com/apis/credentials
+    # Callback URL: {APP_URL}/auth/oauth/google/callback
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
     # Set to true only when a Celery worker process is actually deployed.
     # On Render free tier (API-only), this remains false and contamination
     # checks return an "unavailable" status instead of queuing forever.

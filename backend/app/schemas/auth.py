@@ -9,21 +9,6 @@ from app.schemas.audit import AuditEventResponse
 from app.schemas.common import ORMModel
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    username: str = Field(min_length=3, max_length=32)
-    password: str = Field(min_length=8, max_length=128)
-    display_name: str | None = None
-    bio: str | None = None
-    website: str | None = None
-    affiliation: str | None = None
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
 class AuthUserResponse(ORMModel):
     id: UUID
     email: EmailStr

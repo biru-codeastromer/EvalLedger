@@ -1,45 +1,43 @@
+"""Auth router — session info and API key management.
+
+Email/password registration and login have been retired.  Authentication is
+now performed exclusively via GitHub or Google OAuth (see routers/oauth.py).
+This router handles everything that happens *after* a session is established:
+inspecting the current user profile, minting API keys, and revoking them.
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.config import get_settings
 from app.dependencies import CurrentUser, SessionDep
 from app.errors import AppError
 from app.models.api_key import APIKey
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
-from app.models.user import User
 from app.schemas.audit import AuditEventResponse
 from app.schemas.auth import (
     APIKeyCreateRequest,
     APIKeyCreateResponse,
     APIKeyResponse,
-    LoginRequest,
     MeResponse,
     OwnedBenchmarkResponse,
-    RegisterRequest,
-    TokenResponse,
 )
 from app.security import (
-    create_access_token,
     generate_api_key,
     hash_api_key,
-    hash_password,
-    verify_password,
 )
 from app.services.audit import record_audit_event
 
 router = APIRouter()
-settings = get_settings()
 
 
-def _is_admin_email(email: str) -> bool:
-    return email.lower() in {item.lower() for item in settings.admin_emails}
+def _auth_user_payload(user: object) -> dict[str, object]:
+    from app.models.user import User
 
-
-def _auth_user_payload(user: User) -> dict[str, object]:
+    assert isinstance(user, User)
     return {
         "id": user.id,
         "email": user.email,
@@ -49,54 +47,6 @@ def _auth_user_payload(user: User) -> dict[str, object]:
         "is_verified": user.is_verified,
         "is_admin": user.is_admin,
     }
-
-
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(payload: RegisterRequest, session: SessionDep) -> TokenResponse:
-    existing = await session.scalar(
-        select(User).where(or_(User.email == payload.email, User.username == payload.username))
-    )
-    if existing is not None:
-        raise AppError("user_exists", "A user with that email or username already exists", status_code=409)
-
-    user = User(
-        email=payload.email,
-        username=payload.username,
-        password_hash=hash_password(payload.password),
-        display_name=payload.display_name,
-        bio=payload.bio,
-        website=payload.website,
-        affiliation=payload.affiliation,
-        is_admin=_is_admin_email(payload.email),
-    )
-    session.add(user)
-    await session.flush()
-    await record_audit_event(
-        session,
-        action="user.registered",
-        actor=user,
-        resource_type="user",
-        resource_id=str(user.id),
-        resource_slug=user.username,
-        summary="Created a new EvalLedger account",
-    )
-    await session.commit()
-    await session.refresh(user)
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token, user=_auth_user_payload(user))
-
-
-@router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, session: SessionDep) -> TokenResponse:
-    user = await session.scalar(select(User).where(User.email == payload.email))
-    if user is None or not verify_password(payload.password, user.password_hash):
-        raise AppError("invalid_credentials", "Email or password is incorrect", status_code=401)
-    expected_admin = _is_admin_email(user.email)
-    if user.is_admin != expected_admin:
-        user.is_admin = expected_admin
-        await session.commit()
-    token = create_access_token(str(user.id))
-    return TokenResponse(access_token=token, user=_auth_user_payload(user))
 
 
 @router.post("/api-keys", response_model=APIKeyCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -125,9 +75,7 @@ async def create_api_key(
 
 @router.delete("/api-keys/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def deactivate_api_key(api_key_id: str, session: SessionDep, current_user: CurrentUser) -> None:
-    api_key = await session.scalar(
-        select(APIKey).where(APIKey.id == api_key_id, APIKey.user_id == current_user.id)
-    )
+    api_key = await session.scalar(select(APIKey).where(APIKey.id == api_key_id, APIKey.user_id == current_user.id))
     if api_key is None:
         raise AppError("api_key_not_found", "API key does not exist", status_code=404)
     api_key.is_active = False

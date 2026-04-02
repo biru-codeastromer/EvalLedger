@@ -24,12 +24,17 @@ def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
-def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> str:
+def create_access_token(
+    subject: str,
+    extra_claims: dict[str, Any] | None = None,
+    expiry_minutes: int | None = None,
+) -> str:
     now = datetime.now(UTC)
+    minutes = expiry_minutes if expiry_minutes is not None else settings.jwt_expiration_minutes
     payload: dict[str, Any] = {
         "sub": subject,
         "iat": int(now.timestamp()),
-        "exp": int((now + timedelta(minutes=settings.jwt_expiration_minutes)).timestamp()),
+        "exp": int((now + timedelta(minutes=minutes)).timestamp()),
     }
     if extra_claims:
         payload.update(extra_claims)

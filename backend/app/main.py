@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.database import engine
 from app.errors import register_exception_handlers
 from app.logging import configure_logging, logger
-from app.routers import admin, auth, benchmarks, contamination, search, stats, versions
+from app.routers import admin, auth, benchmarks, contamination, oauth, search, stats, versions
 from app.services.storage import StorageService
 
 settings = get_settings()
@@ -45,6 +45,7 @@ app.add_middleware(
 )
 
 register_exception_handlers(app)
+
 
 @app.middleware("http")
 async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
@@ -80,7 +81,9 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
     response.headers["X-Request-ID"] = request_id
     return response
 
+
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
+app.include_router(oauth.router, prefix="/auth/oauth", tags=["auth"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(benchmarks.router, prefix="/benchmarks", tags=["benchmarks"])
 app.include_router(versions.router, prefix="/benchmarks", tags=["versions"])

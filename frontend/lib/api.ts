@@ -1,7 +1,6 @@
 import {
   APIKeyMetadata,
   AuditEvent,
-  AuthResponse,
   BenchmarkDetail,
   BenchmarkVerificationResponse,
   BenchmarkListItem,
@@ -160,27 +159,16 @@ export async function getJob(jobId: string): Promise<{
   return fetchJSON<{ status: string; result?: unknown }>(`/contamination/jobs/${jobId}`, undefined, true);
 }
 
-export async function loginUser(payload: { email: string; password: string }): Promise<AuthResponse> {
-  const response = await fetch(`${getBaseUrl(true)}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+/**
+ * Fetch the current user's profile using an explicit Bearer token.
+ * Used by the OAuth callback page before the token is stored in localStorage.
+ */
+export async function fetchMeWithToken(token: string): Promise<MeResponse> {
+  const response = await fetch(`${API_PUBLIC_URL}/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
   });
-  return parseResponse<AuthResponse>(response);
-}
-
-export async function registerUser(payload: {
-  email: string;
-  username: string;
-  password: string;
-  display_name?: string;
-}): Promise<AuthResponse> {
-  const response = await fetch(`${getBaseUrl(true)}/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  return parseResponse<AuthResponse>(response);
+  return parseResponse<MeResponse>(response);
 }
 
 export async function getCurrentProfile(): Promise<MeResponse> {

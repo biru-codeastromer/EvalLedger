@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.api_key import APIKey
     from app.models.audit import AuditEvent
     from app.models.benchmark import Benchmark
+    from app.models.user_identity import UserIdentity
     from app.models.version import BenchmarkVersion
 
 
@@ -23,7 +24,8 @@ class User(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    # Nullable: OAuth-only users never set a password.
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
     display_name: Mapped[str | None] = mapped_column(Text)
     bio: Mapped[str | None] = mapped_column(Text)
     website: Mapped[str | None] = mapped_column(Text)
@@ -36,3 +38,4 @@ class User(Base):
     versions: Mapped[list[BenchmarkVersion]] = relationship(back_populates="submitter")
     api_keys: Mapped[list[APIKey]] = relationship(back_populates="user")
     audit_events: Mapped[list[AuditEvent]] = relationship(back_populates="actor")
+    identities: Mapped[list[UserIdentity]] = relationship(back_populates="user")
