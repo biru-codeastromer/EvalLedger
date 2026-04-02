@@ -17,7 +17,9 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://evalledger:evalledger@localhost:5432/evalledger"
     )
-    sync_database_url: str = "postgresql+psycopg://evalledger:evalledger@localhost:5432/evalledger"
+    # Leave empty to auto-derive from database_url (recommended for Fly.io where
+    # only DATABASE_URL is injected by `fly postgres attach`).
+    sync_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
@@ -44,8 +46,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _normalise_database_urls(self) -> Settings:
-        """Render supplies ``postgres://`` URLs; rewrite them to the
-        driver-specific schemes that SQLAlchemy expects."""
+        """Rewrite bare ``postgres://`` / ``postgresql://`` URLs to the
+        driver-specific schemes that SQLAlchemy expects.
+
+        Fly Postgres (and similar managed providers) return ``postgres://``
+        connection strings.  We normalise them here so the rest of the app
+        can always assume the correct driver prefix.
+
+        If ``SYNC_DATABASE_URL`` is not set, it is derived automatically from
+        ``DATABASE_URL`` by substituting the asyncpg driver for psycopg.
+        """
         if self.database_url.startswith("postgres://"):
             self.database_url = self.database_url.replace(
                 "postgres://", "postgresql+asyncpg://", 1
@@ -54,7 +64,13 @@ class Settings(BaseSettings):
             self.database_url = self.database_url.replace(
                 "postgresql://", "postgresql+asyncpg://", 1
             )
-        if self.sync_database_url.startswith("postgres://"):
+
+        if not self.sync_database_url:
+            # Auto-derive sync URL from the now-normalised async URL.
+            self.sync_database_url = self.database_url.replace(
+                "postgresql+asyncpg://", "postgresql+psycopg://", 1
+            )
+        elif self.sync_database_url.startswith("postgres://"):
             self.sync_database_url = self.sync_database_url.replace(
                 "postgres://", "postgresql+psycopg://", 1
             )

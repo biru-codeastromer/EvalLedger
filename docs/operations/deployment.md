@@ -1,6 +1,6 @@
 # Production Deployment
 
-EvalLedger's production backend runs on **Render** with managed PostgreSQL, Redis, and Cloudflare R2 for object storage. The frontend is deployed separately on **Vercel**.
+EvalLedger's production backend runs on **Fly.io** with Fly Managed Postgres, Upstash Redis, and Tigris S3-compatible object storage. The frontend is deployed separately on **Vercel**.
 
 ## Architecture
 
@@ -8,101 +8,263 @@ EvalLedger's production backend runs on **Render** with managed PostgreSQL, Redi
 Vercel (Next.js frontend)
   |
   v  HTTPS
-Render Web Service  (evalledger-api)  -- FastAPI / Uvicorn
-  |           |
-  v           v
-PostgreSQL   Redis -------> Render Worker (evalledger-worker) -- Celery
-  (Render)    (Render)
-                              |
-                              v
-                        Cloudflare R2  (S3-compatible object storage)
+Fly.io – evalledger (web process)   FastAPI / Uvicorn
+  |             |
+  v             v
+Fly Postgres   Upstash Redis ──────> Fly.io – evalledger (worker process)   Celery
+                                         |
+                                         v
+                                   Tigris (S3-compatible object storage)
 ```
 
-## Render services
+The `web` and `worker` processes run from the **same Docker image** inside a single Fly app (`evalledger`), differentiated by Fly process groups. Each process group can be scaled independently.
 
-| Service | Type | Dockerfile | Notes |
-|---------|------|------------|-------|
-| `evalledger-api` | Web Service | `backend/Dockerfile` | Runs Alembic migrations on every deploy via the entrypoint script |
-| `evalledger-worker` | Background Worker | `backend/Dockerfile` | Celery worker; skips migrations (`RUN_MIGRATIONS=false`) |
-| `evalledger-db` | PostgreSQL 16 | managed | Starter plan |
-| `evalledger-redis` | Redis 7 | managed | Starter plan |
+---
+
+## Prerequisites
+
+```bash
+# Install flyctl
+curl -L https://fly.io/install.sh | sh
+
+# Log in
+fly auth login
+```
+
+---
+
+## First-time provisioning
+
+All commands are run from the **repository root** unless otherwise noted.
+
+### 1. Create the Fly app
+
+```bash
+fly apps create evalledger --org personal
+```
+
+### 2. Provision Fly Managed Postgres
+
+```bash
+fly postgres create \
+  --name evalledger-db \
+  --region iad \
+  --vm-size shared-cpu-1x \
+  --volume-size 10 \
+  --initial-cluster-size 1
+
+# Attach injects DATABASE_URL into the evalledger app as a secret.
+fly postgres attach --app evalledger evalledger-db
+```
+
+`fly postgres attach` sets `DATABASE_URL` to a `postgres://` connection string.
+`Settings._normalise_database_urls` rewrites it automatically to:
+- `DATABASE_URL` → `postgresql+asyncpg://…` (async engine)
+- `SYNC_DATABASE_URL` → derived automatically if not set (psycopg, used by Alembic)
+
+If you need to override `SYNC_DATABASE_URL` explicitly:
+
+```bash
+# Grab the raw postgres:// URL that was just injected:
+RAW_DB_URL=$(fly secrets list --app evalledger -j | jq -r '.[] | select(.Name=="DATABASE_URL") | .Digest')
+# Then set it (paste the actual value, not the digest):
+fly secrets set SYNC_DATABASE_URL="postgres://…" --app evalledger
+```
+
+### 3. Provision Upstash Redis
+
+```bash
+fly ext upstash redis create \
+  --name evalledger-redis \
+  --region iad \
+  --plan free
+
+# Wire up the Redis URL (Upstash prints the redis:// URL after creation):
+fly secrets set \
+  REDIS_URL="redis://…" \
+  CELERY_BROKER_URL="redis://…" \
+  CELERY_RESULT_BACKEND="redis://…" \
+  --app evalledger
+```
+
+> Upstash Redis URLs start with `rediss://` (TLS). Use the same URL for all three variables.
+
+### 4. Provision Tigris object storage
+
+```bash
+fly storage create --name evalledger-storage --app evalledger
+```
+
+Tigris injects `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_ENDPOINT_URL_S3`, and `BUCKET_NAME` automatically. Map them to the names EvalLedger expects:
+
+```bash
+# After `fly storage create` prints the credentials, set them:
+fly secrets set \
+  STORAGE_BUCKET="<BUCKET_NAME from Tigris>" \
+  STORAGE_S3_ENDPOINT_URL="<AWS_ENDPOINT_URL_S3 from Tigris>" \
+  STORAGE_S3_ACCESS_KEY_ID="<AWS_ACCESS_KEY_ID from Tigris>" \
+  STORAGE_S3_SECRET_ACCESS_KEY="<AWS_SECRET_ACCESS_KEY from Tigris>" \
+  --app evalledger
+```
+
+### 5. Set remaining secrets
+
+```bash
+fly secrets set \
+  APP_URL="https://evalledger.fly.dev" \
+  FRONTEND_URL="https://eval-ledger.vercel.app" \
+  CORS_ORIGINS='["https://eval-ledger.vercel.app"]' \
+  JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+  --app evalledger
+```
+
+### 6. Deploy
+
+```bash
+# From the backend/ directory (where fly.toml lives):
+cd backend
+fly deploy --app evalledger
+```
+
+Fly will:
+1. Build the Docker image.
+2. Run `uv run alembic upgrade head` in a release VM (migrations).
+3. Roll out new `web` and `worker` machines.
+4. Wait for `/health/live` to return 200 before shifting traffic.
+
+### 7. Verify
+
+```bash
+curl https://evalledger.fly.dev/health
+fly logs --app evalledger
+fly status --app evalledger
+```
+
+### 8. Seed initial data (optional)
+
+```bash
+fly ssh console --app evalledger --command "uv run python -m app.scripts.seed"
+```
+
+---
 
 ## Required environment variables
 
-### API and Worker (shared)
+### Secrets (`fly secrets set`)
 
-| Variable | Source | Example |
-|----------|--------|---------|
-| `APP_ENV` | static | `production` |
-| `DATABASE_URL` | Render DB internal connection string | `postgres://...` (auto-rewritten by the app) |
-| `SYNC_DATABASE_URL` | same as `DATABASE_URL` | `postgres://...` (auto-rewritten by the app) |
-| `REDIS_URL` | Render Redis connection string | `redis://...` |
-| `CELERY_BROKER_URL` | same as `REDIS_URL` | `redis://...` |
-| `CELERY_RESULT_BACKEND` | same as `REDIS_URL` | `redis://...` |
-| `JWT_SECRET_KEY` | generated once, shared | 64-char random string |
-| `STORAGE_BACKEND` | static | `s3` |
-| `STORAGE_BUCKET` | R2 bucket name | `evalledger-prod` |
-| `STORAGE_S3_ENDPOINT_URL` | R2 S3 API endpoint | `https://<account>.r2.cloudflarestorage.com` |
-| `STORAGE_S3_ACCESS_KEY_ID` | R2 API token | |
-| `STORAGE_S3_SECRET_ACCESS_KEY` | R2 API token | |
-| `STORAGE_S3_REGION` | R2 region | `auto` |
+| Variable | Description |
+|---|---|
+| `DATABASE_URL` | Injected by `fly postgres attach`; `postgres://…` is auto-rewritten |
+| `SYNC_DATABASE_URL` | Auto-derived from `DATABASE_URL`; set explicitly only if needed |
+| `REDIS_URL` | Upstash Redis URL (`rediss://…`) |
+| `CELERY_BROKER_URL` | Same as `REDIS_URL` |
+| `CELERY_RESULT_BACKEND` | Same as `REDIS_URL` |
+| `JWT_SECRET_KEY` | 64-char random string; generate with `openssl rand -hex 32` |
+| `APP_URL` | Public Fly.io API URL, e.g. `https://evalledger.fly.dev` |
+| `FRONTEND_URL` | Vercel deployment URL, e.g. `https://eval-ledger.vercel.app` |
+| `CORS_ORIGINS` | JSON array, e.g. `["https://eval-ledger.vercel.app"]` |
+| `STORAGE_BUCKET` | Tigris bucket name |
+| `STORAGE_S3_ENDPOINT_URL` | Tigris S3 endpoint URL |
+| `STORAGE_S3_ACCESS_KEY_ID` | Tigris access key |
+| `STORAGE_S3_SECRET_ACCESS_KEY` | Tigris secret key |
 
-### API only
+### Non-secret env vars (in `fly.toml [env]`)
 
-| Variable | Source | Example |
-|----------|--------|---------|
-| `APP_URL` | Render service URL | `https://evalledger-api.onrender.com` |
-| `FRONTEND_URL` | Vercel deployment URL | `https://eval-ledger.vercel.app` |
-| `CORS_ORIGINS` | JSON list | `["https://eval-ledger.vercel.app"]` |
-| `STORAGE_S3_PRESIGN_ENDPOINT` | R2 public/presign endpoint | same as `STORAGE_S3_ENDPOINT_URL` |
-
-### Worker only
-
-| Variable | Source | Notes |
-|----------|--------|-------|
-| `RUN_MIGRATIONS` | static | Set to `false` so only the API service runs migrations |
+| Variable | Value | Notes |
+|---|---|---|
+| `APP_ENV` | `production` | |
+| `RUN_MIGRATIONS` | `false` | Migrations run via release command, not in-process |
+| `STORAGE_BACKEND` | `s3` | |
+| `STORAGE_S3_REGION` | `auto` | Tigris default; override if needed |
 
 ### Vercel frontend
 
-| Variable | Notes |
-|----------|-------|
-| `NEXT_PUBLIC_API_URL` | Production API URL (e.g. `https://evalledger-api.onrender.com`) |
-| `API_INTERNAL_URL` | Same as `NEXT_PUBLIC_API_URL` (Vercel has no internal network to Render) |
+Set these in the Vercel project dashboard under **Settings → Environment Variables**:
 
-## Database URL rewriting
+| Variable | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | `https://evalledger.fly.dev` |
+| `API_INTERNAL_URL` | `https://evalledger.fly.dev` |
 
-Render provides connection strings with the `postgres://` scheme. The app's `Settings._normalise_database_urls` validator automatically rewrites them:
+---
 
-- `DATABASE_URL`: `postgres://` -> `postgresql+asyncpg://`
-- `SYNC_DATABASE_URL`: `postgres://` -> `postgresql+psycopg://`
+## Database URL normalisation
 
-You can set both `DATABASE_URL` and `SYNC_DATABASE_URL` to the same Render-provided connection string.
+`Settings._normalise_database_urls` (in `backend/app/config.py`) rewrites bare connection strings automatically:
+
+- `DATABASE_URL`: `postgres://` → `postgresql+asyncpg://`
+- `SYNC_DATABASE_URL`: `postgres://` → `postgresql+psycopg://`; if unset, auto-derived from `DATABASE_URL`
+
+You can pass the raw Fly/Postgres `postgres://` URL for both variables and the app handles driver selection.
+
+---
 
 ## Migrations
 
-Migrations run automatically on every deploy of the API service via `bin/docker-entrypoint.sh`. To run manually:
+Alembic migrations run as a Fly **release command** before any new machine is started:
 
-```bash
-# On Render Shell (evalledger-api service)
-uv run alembic upgrade head
+```toml
+# backend/fly.toml
+[deploy]
+  release_command = "uv run alembic upgrade head"
 ```
 
-## Seeding
-
-To load initial benchmark and corpus data in production:
+If migrations fail the deploy is automatically rolled back. To run migrations manually:
 
 ```bash
-# On Render Shell (evalledger-api service)
-uv run python -m app.scripts.seed
+fly ssh console --app evalledger --command "uv run alembic upgrade head"
 ```
+
+The `web` process entrypoint (`bin/docker-entrypoint.sh`) also checks `RUN_MIGRATIONS`, which is set to `false` in `fly.toml` so migrations never run in-process.
+
+---
+
+## Scaling
+
+```bash
+# Scale web machines (adds horizontal replicas):
+fly scale count web=2 --app evalledger
+
+# Scale worker machines:
+fly scale count worker=2 --app evalledger
+
+# Resize VM memory:
+fly scale memory 1024 --app evalledger --process-group web
+```
+
+---
 
 ## Deploying changes
 
 1. Push to `main` (or merge a PR).
-2. Render auto-deploys the API and worker services.
-3. The API entrypoint runs migrations before starting Uvicorn.
-4. Verify: `curl https://evalledger-api.onrender.com/health`
+2. Run `fly deploy --app evalledger` from `backend/`.
+3. Fly runs migrations → rolls out new machines → health-checks pass.
+4. Verify: `curl https://evalledger.fly.dev/health`
 
-## Restart behaviour
+CI can automate this with a GitHub Actions step that calls `flyctl deploy` using a `FLY_API_TOKEN` secret.
 
-Both the API and worker are configured with `restart: always` on Render. The API re-runs migrations on every restart (idempotent via Alembic's version tracking). The worker reconnects to Redis and PostgreSQL automatically via Celery's built-in retry logic.
+---
+
+## Observability
+
+```bash
+fly logs --app evalledger                  # tail all logs
+fly logs --app evalledger -i <machine-id>  # single machine
+fly status --app evalledger                # machine health summary
+fly ssh console --app evalledger           # interactive shell on web machine
+```
+
+---
+
+## What was removed / replaced from the previous Render setup
+
+| Item | Action | Notes |
+|---|---|---|
+| `render.yaml` | Removed | Replaced by `backend/fly.toml` |
+| Render PostgreSQL | Replaced | Fly Managed Postgres (`evalledger-db`) |
+| Render Redis | Replaced | Upstash Redis via Fly extension |
+| Cloudflare R2 (Render-specific config) | Replaced | Tigris via Fly extension; same S3 API, different credentials |
+| `APP_URL sync: false` workaround | Removed | Fly supplies `APP_URL` as a plain secret |
+| Render auto-deploy on push | Replaced | `fly deploy` in CI or manual |
+| `docker-entrypoint.sh` migration logic | Kept (unchanged) | `RUN_MIGRATIONS` env var still respected; release command takes precedence |
+| `Settings._normalise_database_urls` | Extended | Now auto-derives `SYNC_DATABASE_URL` when not set |
