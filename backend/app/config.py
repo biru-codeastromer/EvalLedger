@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://evalledger:evalledger@localhost:5432/evalledger"
     )
-    # Leave empty to auto-derive from database_url (recommended for Fly.io where
-    # only DATABASE_URL is injected by `fly postgres attach`).
+    # Leave empty to auto-derive from database_url. Works with both Render
+    # (which injects postgres:// URLs) and Fly.io (fly postgres attach).
     sync_database_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/0"
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
         """Rewrite bare ``postgres://`` / ``postgresql://`` URLs to the
         driver-specific schemes that SQLAlchemy expects.
 
-        Fly Postgres (and similar managed providers) return ``postgres://``
+        Managed Postgres providers (Render, Fly, etc.) return ``postgres://``
         connection strings.  We normalise them here so the rest of the app
         can always assume the correct driver prefix.
 
