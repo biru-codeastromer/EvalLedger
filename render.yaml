@@ -1,3 +1,9 @@
+# EvalLedger production deployment on Render free tier.
+#
+# This is an API-only deployment. No background worker is deployed.
+# Contamination checks are disabled (WORKER_ENABLED=false).
+# Artifact storage uses the local filesystem and is ephemeral across redeploys.
+
 databases:
   - name: evalledger-db
     plan: free
@@ -30,10 +36,6 @@ services:
         fromDatabase:
           name: evalledger-db
           property: connectionString
-      - key: SYNC_DATABASE_URL
-        fromDatabase:
-          name: evalledger-db
-          property: connectionString
       - key: REDIS_URL
         fromService:
           name: evalledger-redis
@@ -55,20 +57,5 @@ services:
         value: '["https://evalledger-frontend.vercel.app"]'
       - key: STORAGE_BACKEND
         value: local
-      - key: STORAGE_BUCKET
-        sync: false
-      - key: STORAGE_S3_ENDPOINT_URL
-        sync: false
-      - key: STORAGE_S3_ACCESS_KEY_ID
-        sync: false
-      - key: STORAGE_S3_SECRET_ACCESS_KEY
-        sync: false
-      - key: STORAGE_S3_REGION
-        sync: false
-      - key: STORAGE_S3_PRESIGN_ENDPOINT
-        sync: false
-
-  # NOTE: Render free tier does not support background workers.
-  # Celery worker is omitted. Async contamination checks will not process
-  # until a paid plan or alternative deployment (e.g. Fly.io) is used.
-  # The API itself works fully without the worker.
+      - key: WORKER_ENABLED
+        value: "false"

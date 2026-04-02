@@ -39,6 +39,7 @@ class ContaminationCheckResponse(BaseModel):
     status: str
     filename: str
     corpus_ids: list[str]
+    message: str | None = None
 
 
 class ContaminationJobStatus(BaseModel):
@@ -50,4 +51,3 @@ class ContaminationJobStatus(BaseModel):
 
 class RecentSubmissionsResponse(PaginatedResponse):
     items: list[dict[str, Any]]
-

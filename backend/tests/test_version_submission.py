@@ -95,6 +95,9 @@ async def test_create_version_returns_canonical_id(monkeypatch) -> None:
         lambda *_args, **_kwargs: SimpleNamespace(id="job-123"),
     )
 
+    # Enable worker so contamination dispatch runs in this test
+    monkeypatch.setattr(versions_router.settings, "worker_enabled", True)
+
     response = await versions_router.create_version(
         slug="mmlu",
         session=FakeSession(),

@@ -167,7 +167,7 @@ async def create_version(
         release_notes=release_notes,
         released_at=parsed_released_at,
         submitter_id=current_user.id,
-        contamination_status="pending",
+        contamination_status="pending" if settings.worker_enabled else "unchecked",
     )
     versioning_service.apply_citation_string(benchmark, version_record)
     session.add(version_record)
@@ -189,26 +189,29 @@ async def create_version(
     await session.refresh(version_record)
     await session.refresh(benchmark)
 
-    corpus_ids = [
-        str(corpus.id)
-        for corpus in (
-            await session.scalars(
-                select(ReferenceCorpus).where(ReferenceCorpus.is_active.is_(True)).order_by(ReferenceCorpus.name)
-            )
-        ).all()
-    ]
-    task = run_contamination_check.delay(
-        artifact.filename or Path(storage_reference).name,
-        storage_reference,
-        corpus_ids,
-        str(version_record.id),
-    )
+    contamination_job_ids: list[str] = []
+    if settings.worker_enabled:
+        corpus_ids = [
+            str(corpus.id)
+            for corpus in (
+                await session.scalars(
+                    select(ReferenceCorpus).where(ReferenceCorpus.is_active.is_(True)).order_by(ReferenceCorpus.name)
+                )
+            ).all()
+        ]
+        task = run_contamination_check.delay(
+            artifact.filename or Path(storage_reference).name,
+            storage_reference,
+            corpus_ids,
+            str(version_record.id),
+        )
+        contamination_job_ids = [task.id]
     detail = _build_version_detail(benchmark, version_record)
     return VersionCreateResponse(
         benchmark_slug=benchmark.slug,
         version=detail,
         canonical_id=versioning_service.canonical_id(benchmark.slug, version_record.version),
-        contamination_job_ids=[task.id],
+        contamination_job_ids=contamination_job_ids,
     )
 
 

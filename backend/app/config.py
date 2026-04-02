@@ -14,9 +14,7 @@ class Settings(BaseSettings):
     app_name: str = "EvalLedger"
     app_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3000"
-    database_url: str = (
-        "postgresql+asyncpg://evalledger:evalledger@localhost:5432/evalledger"
-    )
+    database_url: str = "postgresql+asyncpg://evalledger:evalledger@localhost:5432/evalledger"
     # Leave empty to auto-derive from database_url. Works with both Render
     # (which injects postgres:// URLs) and Fly.io (fly postgres attach).
     sync_database_url: str = ""
@@ -38,9 +36,11 @@ class Settings(BaseSettings):
     storage_s3_presign_endpoint: str | None = None
     max_public_upload_bytes: int = 10 * 1024 * 1024
     max_authenticated_upload_bytes: int = 250 * 1024 * 1024
-    allowed_artifact_extensions: list[str] = Field(
-        default_factory=lambda: [".json", ".jsonl", ".csv", ".parquet"]
-    )
+    allowed_artifact_extensions: list[str] = Field(default_factory=lambda: [".json", ".jsonl", ".csv", ".parquet"])
+    # Set to true only when a Celery worker process is actually deployed.
+    # On Render free tier (API-only), this remains false and contamination
+    # checks return an "unavailable" status instead of queuing forever.
+    worker_enabled: bool = False
     contamination_default_threshold: float = 0.8
     contamination_num_perm: int = 128
 
@@ -57,27 +57,17 @@ class Settings(BaseSettings):
         ``DATABASE_URL`` by substituting the asyncpg driver for psycopg.
         """
         if self.database_url.startswith("postgres://"):
-            self.database_url = self.database_url.replace(
-                "postgres://", "postgresql+asyncpg://", 1
-            )
+            self.database_url = self.database_url.replace("postgres://", "postgresql+asyncpg://", 1)
         elif self.database_url.startswith("postgresql://"):
-            self.database_url = self.database_url.replace(
-                "postgresql://", "postgresql+asyncpg://", 1
-            )
+            self.database_url = self.database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
         if not self.sync_database_url:
             # Auto-derive sync URL from the now-normalised async URL.
-            self.sync_database_url = self.database_url.replace(
-                "postgresql+asyncpg://", "postgresql+psycopg://", 1
-            )
+            self.sync_database_url = self.database_url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
         elif self.sync_database_url.startswith("postgres://"):
-            self.sync_database_url = self.sync_database_url.replace(
-                "postgres://", "postgresql+psycopg://", 1
-            )
+            self.sync_database_url = self.sync_database_url.replace("postgres://", "postgresql+psycopg://", 1)
         elif self.sync_database_url.startswith("postgresql://"):
-            self.sync_database_url = self.sync_database_url.replace(
-                "postgresql://", "postgresql+psycopg://", 1
-            )
+            self.sync_database_url = self.sync_database_url.replace("postgresql://", "postgresql+psycopg://", 1)
         return self
 
 

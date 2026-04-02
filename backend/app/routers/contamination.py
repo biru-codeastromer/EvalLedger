@@ -60,6 +60,16 @@ async def run_check(
     corpus_ids: Annotated[str | None, Form()] = None,
     current_user: OptionalUser = None,
 ) -> ContaminationCheckResponse:
+    if not settings.worker_enabled:
+        return ContaminationCheckResponse(
+            job_id="",
+            status="unavailable",
+            filename=artifact.filename or "unknown",
+            corpus_ids=[],
+            message="Background processing is not available on the current deployment. "
+            "Contamination checks require a Celery worker, which is not running.",
+        )
+
     artifact_descriptor = validate_upload_file(artifact, authenticated=current_user is not None, settings=settings)
     file_bytes = await artifact.read()
     selected_ids = _parse_corpus_ids(corpus_ids)
@@ -94,6 +104,13 @@ async def run_check(
 
 @router.get("/jobs/{job_id}", response_model=ContaminationJobStatus)
 async def get_job_status(job_id: str) -> ContaminationJobStatus:
+    if not settings.worker_enabled:
+        return ContaminationJobStatus(
+            job_id=job_id,
+            status="unavailable",
+            error="Background processing is not available on the current deployment.",
+        )
+
     result = AsyncResult(job_id, app=celery_app)
     if result.failed():
         return ContaminationJobStatus(job_id=job_id, status="failed", error=str(result.result))

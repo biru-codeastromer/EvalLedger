@@ -28,10 +28,24 @@ export default function ContaminationPage() {
       const formData = new FormData();
       formData.append("artifact", file);
       formData.append("corpus_ids", JSON.stringify(selected));
-      const job = await runAdHocCheck(formData);
+      const job = await runAdHocCheck(formData) as { job_id: string; status: string; message?: string };
+      if (job.status === "unavailable") {
+        setLoading(false);
+        setError(
+          job.message ??
+            "Background processing is not available on this deployment. Contamination checks require a worker process."
+        );
+        return;
+      }
       const interval = window.setInterval(async () => {
         try {
           const status = await getJob(job.job_id);
+          if (status.status === "unavailable") {
+            setError("Background processing is not available on this deployment.");
+            setLoading(false);
+            window.clearInterval(interval);
+            return;
+          }
           if (status.status === "completed") {
             const result = status.result as { corpora: ContaminationReport[] };
             setReports(result.corpora);
