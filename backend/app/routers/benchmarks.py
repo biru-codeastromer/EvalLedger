@@ -111,9 +111,14 @@ async def create_benchmark(
         summary=f"Created benchmark {benchmark.slug}",
     )
     await session.commit()
-    await session.refresh(benchmark)
-    item = _benchmark_item(benchmark)
-    return BenchmarkDetail(**item.model_dump(), submitter=current_user)
+    created = await session.scalar(
+        select(Benchmark)
+        .options(selectinload(Benchmark.versions), selectinload(Benchmark.submitter))
+        .where(Benchmark.id == benchmark.id)
+    )
+    assert created is not None
+    item = _benchmark_item(created)
+    return BenchmarkDetail(**item.model_dump(), submitter=created.submitter)
 
 
 @router.patch("/{slug}", response_model=BenchmarkDetail)
