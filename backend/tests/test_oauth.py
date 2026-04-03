@@ -12,6 +12,26 @@ from app.routers import oauth as oauth_router
 from app.security import create_access_token
 
 # ---------------------------------------------------------------------------
+# Shared test helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_request() -> MagicMock:
+    """Return a minimal mock Request sufficient for rate-limit and callback tests."""
+    req = MagicMock()
+    req.headers = {}
+    client = MagicMock()
+    client.host = "127.0.0.1"
+    req.client = client
+    return req
+
+
+async def _passthrough_rate_limit(request: object, bucket: str) -> None:
+    """Stub for _oauth_rate_limit that never throttles (returns None)."""
+    return None
+
+
+# ---------------------------------------------------------------------------
 # State-token helpers
 # ---------------------------------------------------------------------------
 
@@ -243,7 +263,11 @@ async def test_find_or_create_returns_existing_identity(monkeypatch: pytest.Monk
 async def test_github_callback_error_param_redirects_to_login(monkeypatch: pytest.MonkeyPatch) -> None:
     """If GitHub returns ?error=access_denied, redirect to /login with a message."""
     fake_session = AsyncMock()
+    fake_request = _make_fake_request()
+    # Patch rate limiter so it never throttles inside unit tests.
+    monkeypatch.setattr(oauth_router, "_oauth_rate_limit", _passthrough_rate_limit)
     response = await oauth_router.github_oauth_callback(
+        request=fake_request,
         session=fake_session,  # type: ignore[arg-type]
         code=None,
         state=None,
@@ -258,7 +282,10 @@ async def test_github_callback_error_param_redirects_to_login(monkeypatch: pytes
 async def test_github_callback_invalid_state_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     """An invalid state token should redirect to login with an error."""
     fake_session = AsyncMock()
+    fake_request = _make_fake_request()
+    monkeypatch.setattr(oauth_router, "_oauth_rate_limit", _passthrough_rate_limit)
     response = await oauth_router.github_oauth_callback(
+        request=fake_request,
         session=fake_session,  # type: ignore[arg-type]
         code="some-code",
         state="not-a-real-state-jwt",
@@ -272,7 +299,10 @@ async def test_github_callback_invalid_state_redirects(monkeypatch: pytest.Monke
 async def test_google_callback_error_param_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
     """If Google returns ?error=access_denied, redirect to /login."""
     fake_session = AsyncMock()
+    fake_request = _make_fake_request()
+    monkeypatch.setattr(oauth_router, "_oauth_rate_limit", _passthrough_rate_limit)
     response = await oauth_router.google_oauth_callback(
+        request=fake_request,
         session=fake_session,  # type: ignore[arg-type]
         code=None,
         state=None,

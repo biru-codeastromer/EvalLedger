@@ -231,3 +231,81 @@ async def test_rate_limit_dependency_uses_anon_limit_for_unauthenticated() -> No
             await dep(request)
 
     assert calls[0][2] == 30  # anon_limit used
+
+
+# ---------------------------------------------------------------------------
+# OAuth callback rate limiting (_oauth_rate_limit helper)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_oauth_rate_limit_allows_request_within_limit() -> None:
+    """_oauth_rate_limit returns None when under the limit."""
+    from unittest.mock import AsyncMock
+
+    from app.routers.oauth import _oauth_rate_limit
+
+    request = _make_request(client_host="1.2.3.4")
+    with patch("app.routers.oauth.RateLimiter") as mock_limiter:
+        instance = mock_limiter.return_value
+        instance.check = AsyncMock(return_value=None)
+        result = await _oauth_rate_limit(request, "oauth_callback_github")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_github_redirects_when_over_limit() -> None:
+    """github_oauth_callback bounces to the login page when throttled."""
+    from app.ratelimit import RateLimitError
+    from app.routers.oauth import _oauth_rate_limit
+
+    request = _make_request(client_host="1.2.3.4")
+    with patch("app.routers.oauth.RateLimiter") as mock_limiter:
+        instance = mock_limiter.return_value
+        instance.check = AsyncMock(side_effect=RateLimitError(retry_after=30))
+        result = await _oauth_rate_limit(request, "oauth_callback_github")
+
+    assert result is not None
+    assert result.status_code == 302
+    location = result.headers["location"]
+    assert "/login" in location
+    assert "error" in location
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_google_redirects_when_over_limit() -> None:
+    """google_oauth_callback bounces to the login page when throttled."""
+    from app.ratelimit import RateLimitError
+    from app.routers.oauth import _oauth_rate_limit
+
+    request = _make_request(client_host="5.6.7.8")
+    with patch("app.routers.oauth.RateLimiter") as mock_limiter:
+        instance = mock_limiter.return_value
+        instance.check = AsyncMock(side_effect=RateLimitError(retry_after=15))
+        result = await _oauth_rate_limit(request, "oauth_callback_google")
+
+    assert result is not None
+    assert result.status_code == 302
+    location = result.headers["location"]
+    assert "/login" in location
+    assert "error" in location
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_rate_limit_uses_correct_bucket() -> None:
+    """Each callback route passes its own dedicated bucket name to the limiter."""
+    from app.routers.oauth import _oauth_rate_limit
+
+    buckets_checked: list[str] = []
+
+    async def _capture(_self: object, name: str, client_id: str, limit: int, window_seconds: int) -> None:
+        buckets_checked.append(name)
+
+    request = _make_request(client_host="9.9.9.9")
+    with patch("app.ratelimit.RateLimiter.check", new=_capture):
+        with patch("app.routers.oauth.settings") as mock_settings:
+            mock_settings.rate_limit_enabled = True
+            await _oauth_rate_limit(request, "oauth_callback_github")
+            await _oauth_rate_limit(request, "oauth_callback_google")
+
+    assert buckets_checked == ["oauth_callback_github", "oauth_callback_google"]

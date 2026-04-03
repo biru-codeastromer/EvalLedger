@@ -170,6 +170,8 @@ EvalLedger enforces a **Redis-backed fixed-window rate limiter** on all public a
 | `contamination_check` | `POST /contamination/check` | 10/min | 20/min |
 | `oauth_start_github` | `GET /auth/oauth/github` | 20/min | 20/min |
 | `oauth_start_google` | `GET /auth/oauth/google` | 20/min | 20/min |
+| `oauth_callback_github` | `GET /auth/oauth/github/callback` | 20/min | 20/min |
+| `oauth_callback_google` | `GET /auth/oauth/google/callback` | 20/min | 20/min |
 
 ### Over-limit response
 
@@ -187,7 +189,7 @@ JSON endpoints respond with **HTTP 429** and a structured error body:
 
 The response also includes a standard **`Retry-After: <seconds>`** header.
 
-OAuth start endpoints (browser redirect flow) respond with a **302 redirect** to `/login?error=Too+many+sign-in+attempts...` instead.
+OAuth start **and** callback endpoints (browser redirect flow) respond with a **302 redirect** to `/login?error=Too+many+sign-in+attempts...` instead of JSON, so the browser flow is never broken mid-flight.
 
 ### Env vars
 

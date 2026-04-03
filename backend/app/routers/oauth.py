@@ -61,11 +61,11 @@ def _frontend_error_redirect(message: str) -> RedirectResponse:
 
 
 async def _oauth_rate_limit(request: Request, bucket: str) -> RedirectResponse | None:
-    """Return a redirect response if the OAuth start endpoint is over limit.
+    """Return a redirect response if an OAuth route is over its rate limit.
 
-    OAuth start routes return ``RedirectResponse``, so they cannot raise a
-    standard JSON ``AppError``.  Instead, over-limit requests are bounced back
-    to the login page with an error query parameter.
+    All OAuth routes (start *and* callback) return ``RedirectResponse``, so
+    they cannot raise a standard JSON ``AppError``.  Over-limit requests are
+    bounced back to the frontend login page with an ``error`` query parameter.
 
     Returns ``None`` if the request is within the allowed rate.
     """
@@ -109,12 +109,15 @@ async def github_oauth_start(request: Request) -> RedirectResponse:
 
 @router.get("/github/callback")
 async def github_oauth_callback(
+    request: Request,
     session: SessionDep,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
     """Handle the GitHub OAuth callback, exchange the code, and issue a JWT."""
+    if (rate_limit_response := await _oauth_rate_limit(request, "oauth_callback_github")) is not None:
+        return rate_limit_response
     if error:
         return _frontend_error_redirect(f"GitHub login was denied: {error}")
 
@@ -218,12 +221,15 @@ async def google_oauth_start(request: Request) -> RedirectResponse:
 
 @router.get("/google/callback")
 async def google_oauth_callback(
+    request: Request,
     session: SessionDep,
     code: str | None = None,
     state: str | None = None,
     error: str | None = None,
 ) -> RedirectResponse:
     """Handle the Google OAuth callback, exchange the code, and issue a JWT."""
+    if (rate_limit_response := await _oauth_rate_limit(request, "oauth_callback_google")) is not None:
+        return rate_limit_response
     if error:
         return _frontend_error_redirect(f"Google login was denied: {error}")
 
