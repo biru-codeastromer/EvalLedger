@@ -57,14 +57,42 @@ Go to [https://render.com](https://render.com) and sign up.
 
 After deployment, go to `evalledger-api` → **Environment** → set `APP_URL` to the assigned URL (e.g. `https://evalledger-api.onrender.com`).
 
-### 4. Verify
+### 4. Configure OAuth providers
+
+Authentication uses **GitHub OAuth** and **Google OAuth** exclusively. Set up both providers and add their credentials to the Render environment.
+
+#### GitHub OAuth App
+
+1. Go to **https://github.com/settings/developers** → OAuth Apps → **New OAuth App**
+2. Fill in:
+   - **Homepage URL**: `https://evalledger-frontend.vercel.app`
+   - **Authorization callback URL**: `https://evalledger-api.onrender.com/auth/oauth/github/callback`
+3. Click **Register application** → copy **Client ID** → generate and copy **Client Secret**
+4. In Render → `evalledger-api` → **Environment**, set:
+   - `GITHUB_CLIENT_ID` = the client ID
+   - `GITHUB_CLIENT_SECRET` = the client secret
+
+#### Google OAuth App
+
+1. Go to **https://console.cloud.google.com/apis/credentials** (create a new project, e.g. `evalledger`)
+2. Configure the **OAuth consent screen** (Google Auth Platform → Branding, Audience)
+3. Go to **Clients** → **Create client** → **Web application**
+   - **Authorized redirect URI**: `https://evalledger-api.onrender.com/auth/oauth/google/callback`
+4. Copy **Client ID** and **Client Secret**
+5. In Render → `evalledger-api` → **Environment**, set:
+   - `GOOGLE_CLIENT_ID` = the client ID
+   - `GOOGLE_CLIENT_SECRET` = the client secret
+
+> **Note:** The Google app starts in "Testing" status. Only test users added in the Audience page can sign in. This is fine for a small team. To open it to all Google users, submit for verification.
+
+### 5. Verify
 
 ```bash
 curl https://evalledger-api.onrender.com/health/live
 curl https://evalledger-api.onrender.com/health
 ```
 
-### 5. Seed initial data
+### 6. Seed initial data
 
 In the Render dashboard → `evalledger-api` → **Shell**:
 
@@ -72,7 +100,7 @@ In the Render dashboard → `evalledger-api` → **Shell**:
 uv run python -m app.scripts.seed
 ```
 
-### 6. Wire the Vercel frontend
+### 7. Wire the Vercel frontend
 
 In the Vercel project → **Settings → Environment Variables**:
 
@@ -102,6 +130,10 @@ Then redeploy the frontend from the Vercel Deployments tab.
 | `WORKER_ENABLED` | static | `false` — no Celery worker is deployed |
 | `APP_URL` | manual | Set after deploy (e.g. `https://evalledger-api.onrender.com`) |
 | `FRONTEND_URL` | static | `https://evalledger-frontend.vercel.app` |
+| `GITHUB_CLIENT_ID` | manual | GitHub OAuth App client ID |
+| `GITHUB_CLIENT_SECRET` | manual | GitHub OAuth App client secret |
+| `GOOGLE_CLIENT_ID` | manual | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | manual | Google OAuth client secret |
 
 ### Vercel
 

@@ -29,15 +29,21 @@ Then open [http://localhost:3000](http://localhost:3000) for the web interface a
 - Machine-readable schema: `standard/metadata_schema.json`
 - Maintainer and operations runbooks: `docs/README.md`
 
+## Authentication
+
+Sign in via **GitHub** or **Google** at `/login`. No password required. After signing in, mint an API key from your account page for CLI and programmatic access.
+
 ## CLI
 
 ```bash
 cd cli
 uv sync
-uv run evalledger login --email researcher@example.org --password your-password
+uv run evalledger login --api-key el_your_api_key_here
 uv run evalledger submit --name "MMLU" --slug mmlu --version 2.0.0 --file ./mmlu.jsonl --domain reasoning --task-type multiple_choice --paper https://arxiv.org/abs/2009.03300 --license MIT
 uv run evalledger verify mmlu 2.0.0
 ```
+
+API keys are created from the account page (`/account`) after signing in with GitHub or Google.
 
 ## API overview
 
