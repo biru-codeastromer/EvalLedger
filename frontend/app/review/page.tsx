@@ -1,9 +1,9 @@
 "use client";
 
-import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Route } from "next";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ActivityFeed } from "@/components/ui/ActivityFeed";
 import {
@@ -11,11 +11,12 @@ import {
   addReviewNote,
   getAdminAuditEvents,
   getAdminStats,
+  getBenchmarkReviewContext,
   getCurrentProfile,
   getReviewQueue,
   setBenchmarkVerification
 } from "@/lib/api";
-import type { ReviewQueueItem } from "@/lib/types";
+import type { BenchmarkReviewContext, ReviewQueueItem } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Small helper components
@@ -55,6 +56,11 @@ function formatBytes(bytes: number | null): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatDateTime(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return new Date(value).toLocaleString();
+}
+
 // ---------------------------------------------------------------------------
 // Benchmark review card
 // ---------------------------------------------------------------------------
@@ -63,17 +69,29 @@ type ReviewCardProps = {
   benchmark: ReviewQueueItem;
   onVerify: (slug: string, verified: boolean, note?: string) => void;
   onNote: (slug: string, note: string) => void;
+  onInspect: (slug: string) => void;
   isPending: boolean;
+  isSelected: boolean;
 };
 
-function ReviewCard({ benchmark, onVerify, onNote, isPending }: ReviewCardProps) {
+function ReviewCard({
+  benchmark,
+  onVerify,
+  onNote,
+  onInspect,
+  isPending,
+  isSelected
+}: ReviewCardProps) {
   const [noteText, setNoteText] = useState("");
   const [showNoteInput, setShowNoteInput] = useState(false);
 
   return (
     <div
-      className="rounded-sm border p-5 space-y-3"
-      style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+      className="space-y-3 rounded-sm border p-5"
+      style={{
+        borderColor: isSelected ? "var(--accent)" : "var(--border)",
+        background: "var(--bg)"
+      }}
     >
       {/* Header row */}
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -96,6 +114,13 @@ function ReviewCard({ benchmark, onVerify, onNote, isPending }: ReviewCardProps)
         </div>
         {/* Action buttons */}
         <div className="flex flex-shrink-0 gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-[13px]"
+            onClick={() => onInspect(benchmark.slug)}
+          >
+            {isSelected ? "Context open" : "Inspect context"}
+          </button>
           <button
             type="button"
             className="btn-secondary text-[13px]"
@@ -205,6 +230,219 @@ function ReviewCard({ benchmark, onVerify, onNote, isPending }: ReviewCardProps)
   );
 }
 
+type ReviewContextPanelProps = {
+  slug: string | null;
+  context?: BenchmarkReviewContext;
+  isLoading: boolean;
+  error: unknown;
+};
+
+function ReviewContextPanel({ slug, context, isLoading, error }: ReviewContextPanelProps) {
+  if (!slug) {
+    return (
+      <div className="rounded-sm border border-[var(--border)] px-5 py-8 text-center text-[14px] text-[var(--text-dim)]">
+        Select a benchmark from the queue to inspect versions, integrity details, and benchmark-specific audit history.
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="rounded-sm border border-[var(--border)] px-5 py-8 text-[14px] text-[var(--text-dim)]">
+        Loading reviewer context…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-sm border border-red-200 bg-red-50 px-5 py-8 text-[14px] text-red-700">
+        Failed to load benchmark context: {error instanceof APIError ? error.message : "Unknown error"}
+      </div>
+    );
+  }
+
+  if (!context) {
+    return (
+      <div className="rounded-sm border border-[var(--border)] px-5 py-8 text-[14px] text-[var(--text-dim)]">
+        No review context is available for this benchmark yet.
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 rounded-sm border border-[var(--border)] p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <div className="mono">Selected benchmark context</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/registry/${context.slug}` as Route}
+              className="font-[var(--font-display)] text-[24px] leading-none hover:underline"
+            >
+              {context.name}
+            </Link>
+            <ContaminationBadge status={context.latest_contamination_status} />
+            {context.is_verified && (
+              <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                verified
+              </span>
+            )}
+          </div>
+          {context.description && (
+            <p className="max-w-3xl text-[14px] leading-7 text-[var(--text-dim)]">{context.description}</p>
+          )}
+        </div>
+        <Link href={`/registry/${context.slug}` as Route} className="btn-secondary inline-flex text-[13px]">
+          Open public record
+        </Link>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded border border-[var(--border)] bg-[var(--bg-subtle)] p-3 text-[13px]">
+          <div className="mono mb-2">Submission</div>
+          <div className="space-y-1 text-[var(--text-dim)]">
+            <p>
+              Submitter:{" "}
+              <span className="text-[var(--text)]">{context.submitter?.username ?? "Unknown"}</span>
+            </p>
+            {context.submitter?.affiliation && <p>Affiliation: {context.submitter.affiliation}</p>}
+            {context.submitter_providers.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {context.submitter_providers.map((provider) => (
+                  <ProviderBadge key={provider} provider={provider} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded border border-[var(--border)] bg-[var(--bg-subtle)] p-3 text-[13px]">
+          <div className="mono mb-2">Integrity</div>
+          <div className="space-y-1 text-[var(--text-dim)]">
+            <p>Versions: <span className="text-[var(--text)]">{context.versions.length}</span></p>
+            {context.latest_artifact_sha256 && (
+              <p title={context.latest_artifact_sha256}>
+                sha256:{" "}
+                <span className="font-mono text-[var(--text)]">
+                  {context.latest_artifact_sha256.slice(0, 16)}…
+                </span>
+              </p>
+            )}
+            {context.latest_artifact_size_bytes !== null && (
+              <p>Latest artifact: <span className="text-[var(--text)]">{formatBytes(context.latest_artifact_size_bytes)}</span></p>
+            )}
+            {context.latest_num_examples !== null && (
+              <p>Examples: <span className="text-[var(--text)]">{context.latest_num_examples.toLocaleString()}</span></p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded border border-[var(--border)] bg-[var(--bg-subtle)] p-3 text-[13px]">
+          <div className="mono mb-2">Review state</div>
+          <div className="space-y-1 text-[var(--text-dim)]">
+            <p>Status: <span className="text-[var(--text)]">{context.is_verified ? "Verified" : "Pending review"}</span></p>
+            {context.reviewed_by && <p>Last reviewer: <span className="text-[var(--text)]">{context.reviewed_by.username}</span></p>}
+            {formatDateTime(context.reviewed_at) && <p>Reviewed at: {formatDateTime(context.reviewed_at)}</p>}
+            {context.review_note && <p className="line-clamp-3">Note: <span className="text-[var(--text)]">{context.review_note}</span></p>}
+          </div>
+        </div>
+
+        <div className="rounded border border-[var(--border)] bg-[var(--bg-subtle)] p-3 text-[13px]">
+          <div className="mono mb-2">Record metadata</div>
+          <div className="space-y-1 text-[var(--text-dim)]">
+            {context.task_type && <p>Task: <span className="text-[var(--text)]">{context.task_type}</span></p>}
+            {context.domain.length > 0 && <p>Domain: <span className="text-[var(--text)]">{context.domain.join(", ")}</span></p>}
+            {formatDateTime(context.created_at) && <p>Created: {formatDateTime(context.created_at)}</p>}
+            {formatDateTime(context.updated_at) && <p>Updated: {formatDateTime(context.updated_at)}</p>}
+          </div>
+        </div>
+      </div>
+
+      <section className="space-y-4">
+        <div className="mono">Version history</div>
+        {context.versions.length > 0 ? (
+          <div className="space-y-3">
+            {context.versions.map((version) => (
+              <div
+                key={version.id}
+                className="space-y-3 rounded-sm border border-[var(--border)] p-4"
+                style={{ background: "var(--bg)" }}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Link
+                        href={`/registry/${context.slug}/${version.version}` as Route}
+                        className="font-medium hover:underline"
+                      >
+                        Version {version.version}
+                      </Link>
+                      <ContaminationBadge status={version.contamination_status} />
+                    </div>
+                    <div className="text-[12px] text-[var(--text-dim)]">
+                      Submitted by{" "}
+                      <span className="text-[var(--text)]">{version.submitter?.username ?? "Unknown"}</span>
+                      {version.submitter?.affiliation ? ` · ${version.submitter.affiliation}` : ""}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[12px]">
+                    {version.paper_url && (
+                      <a
+                        href={version.paper_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-secondary inline-flex text-[12px]"
+                      >
+                        Paper
+                      </a>
+                    )}
+                    {version.github_url && (
+                      <a
+                        href={version.github_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-secondary inline-flex text-[12px]"
+                      >
+                        Code
+                      </a>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-2 text-[12px] text-[var(--text-dim)] md:grid-cols-2 xl:grid-cols-4">
+                  {version.num_examples !== null && <div>Examples: <span className="text-[var(--text)]">{version.num_examples.toLocaleString()}</span></div>}
+                  {version.artifact_size_bytes !== null && <div>Size: <span className="text-[var(--text)]">{formatBytes(version.artifact_size_bytes)}</span></div>}
+                  {version.license && <div>License: <span className="text-[var(--text)]">{version.license}</span></div>}
+                  {formatDateTime(version.released_at) && <div>Released: {formatDateTime(version.released_at)}</div>}
+                  {formatDateTime(version.created_at) && <div>Submitted: {formatDateTime(version.created_at)}</div>}
+                  {version.artifact_sha256 && (
+                    <div className="md:col-span-2 xl:col-span-3" title={version.artifact_sha256}>
+                      sha256:{" "}
+                      <span className="font-mono text-[var(--text)]">{version.artifact_sha256}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[14px] text-[var(--text-dim)]">
+            No versions are attached to this benchmark yet.
+          </p>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div className="mono">Benchmark-specific audit history</div>
+        <ActivityFeed
+          events={context.audit_history}
+          emptyMessage="Verification notes, review decisions, and version actions for this benchmark will appear here."
+        />
+      </section>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
@@ -214,6 +452,7 @@ type QueueStatus = "pending" | "verified" | "all";
 export default function ReviewPage() {
   const queryClient = useQueryClient();
   const [queueStatus, setQueueStatus] = useState<QueueStatus>("pending");
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
 
   const [profileQuery, statsQuery, reviewQueueQuery, auditQuery] = useQueries({
     queries: [
@@ -228,21 +467,43 @@ export default function ReviewPage() {
     ]
   });
 
+  useEffect(() => {
+    const benchmarks = reviewQueueQuery.data ?? [];
+    if (benchmarks.length === 0) {
+      if (selectedSlug !== null) {
+        setSelectedSlug(null);
+      }
+      return;
+    }
+    if (!selectedSlug || !benchmarks.some((benchmark) => benchmark.slug === selectedSlug)) {
+      setSelectedSlug(benchmarks[0].slug);
+    }
+  }, [reviewQueueQuery.data, selectedSlug]);
+
+  const contextQuery = useQuery({
+    queryKey: ["review-context", selectedSlug],
+    queryFn: () => getBenchmarkReviewContext(selectedSlug as string),
+    enabled: Boolean(profileQuery.data?.user.is_admin && selectedSlug),
+    retry: false
+  });
+
   const verifyMutation = useMutation({
     mutationFn: ({ slug, verified, note }: { slug: string; verified: boolean; note?: string }) =>
       setBenchmarkVerification(slug, verified, note),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-audit"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["review-context", variables.slug] });
     }
   });
 
   const noteMutation = useMutation({
     mutationFn: ({ slug, note }: { slug: string; note: string }) => addReviewNote(slug, note),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       void queryClient.invalidateQueries({ queryKey: ["review-queue"] });
       void queryClient.invalidateQueries({ queryKey: ["admin-audit"] });
+      void queryClient.invalidateQueries({ queryKey: ["review-context", variables.slug] });
     }
   });
 
@@ -336,6 +597,14 @@ export default function ReviewPage() {
 
       {/* Review queue */}
       <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="mono">Benchmarks awaiting attention</div>
+          {selectedSlug && (
+            <div className="text-[12px] text-[var(--text-dim)]">
+              Inspecting <span className="font-medium text-[var(--text)]">{selectedSlug}</span>
+            </div>
+          )}
+        </div>
         {reviewQueueQuery.isLoading ? (
           <p className="text-[14px] text-[var(--text-dim)]">Loading queue…</p>
         ) : reviewQueueQuery.isError ? (
@@ -351,6 +620,8 @@ export default function ReviewPage() {
               key={benchmark.id}
               benchmark={benchmark}
               isPending={isActionPending}
+              isSelected={selectedSlug === benchmark.slug}
+              onInspect={(slug) => setSelectedSlug(slug)}
               onVerify={(slug, verified, note) =>
                 verifyMutation.mutate({ slug, verified, note })
               }
@@ -378,6 +649,15 @@ export default function ReviewPage() {
               : "Unknown error — please try again."}
           </div>
         )}
+      </section>
+
+      <section className="space-y-4">
+        <ReviewContextPanel
+          slug={selectedSlug}
+          context={contextQuery.data}
+          isLoading={contextQuery.isLoading}
+          error={contextQuery.error}
+        />
       </section>
 
       {/* Audit feed */}
