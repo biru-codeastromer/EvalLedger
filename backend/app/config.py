@@ -33,7 +33,12 @@ class Settings(BaseSettings):
     storage_s3_access_key_id: str | None = None
     storage_s3_secret_access_key: str | None = None
     storage_s3_region: str = "us-east-1"
+    # Public endpoint used when rewriting presigned URLs for external clients.
+    # For Cloudflare R2: set to your R2 public bucket domain, e.g.
+    # https://pub-<hash>.r2.dev  or your custom domain.
     storage_s3_presign_endpoint: str | None = None
+    # Presigned download URL lifetime in seconds (default 1 hour).
+    storage_s3_presign_ttl: int = 3600
     max_public_upload_bytes: int = 10 * 1024 * 1024
     max_authenticated_upload_bytes: int = 250 * 1024 * 1024
     allowed_artifact_extensions: list[str] = Field(default_factory=lambda: [".json", ".jsonl", ".csv", ".parquet"])
@@ -67,6 +72,38 @@ class Settings(BaseSettings):
     worker_enabled: bool = False
     contamination_default_threshold: float = 0.8
     contamination_num_perm: int = 128
+
+    @model_validator(mode="after")
+    def _validate_s3_settings(self) -> Settings:
+        """Raise early if STORAGE_BACKEND=s3 but required credentials are absent.
+
+        All four variables are required:
+        - STORAGE_S3_ENDPOINT_URL   — provider endpoint (e.g. Cloudflare R2 URL)
+        - STORAGE_S3_ACCESS_KEY_ID  — access key
+        - STORAGE_S3_SECRET_ACCESS_KEY — secret key
+        - STORAGE_S3_PRESIGN_ENDPOINT  — public domain used in presigned URLs
+
+        This is intentionally a hard error rather than a warning so that a
+        misconfigured production deploy fails loudly at startup instead of
+        silently falling back to ephemeral local storage.
+        """
+        if self.storage_backend == "s3":
+            missing = [
+                name
+                for name, value in [
+                    ("STORAGE_S3_ENDPOINT_URL", self.storage_s3_endpoint_url),
+                    ("STORAGE_S3_ACCESS_KEY_ID", self.storage_s3_access_key_id),
+                    ("STORAGE_S3_SECRET_ACCESS_KEY", self.storage_s3_secret_access_key),
+                    ("STORAGE_S3_PRESIGN_ENDPOINT", self.storage_s3_presign_endpoint),
+                ]
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    f"STORAGE_BACKEND=s3 requires these env vars to be set: "
+                    f"{', '.join(missing)}"
+                )
+        return self
 
     @model_validator(mode="after")
     def _normalise_database_urls(self) -> Settings:

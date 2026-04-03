@@ -55,9 +55,23 @@ class StorageService:
             return
 
         def _ensure_bucket() -> None:
-            existing = {bucket["Name"] for bucket in self.client.list_buckets().get("Buckets", [])}
-            if self.settings.storage_bucket not in existing:
-                self.client.create_bucket(Bucket=self.settings.storage_bucket)
+            # Use head_bucket instead of list_buckets: list_buckets requires
+            # account-level permission (s3:ListAllMyBuckets) that Cloudflare R2
+            # API tokens do not grant by default.  head_bucket only needs
+            # bucket-scoped read access and is supported by all S3-compatible
+            # providers.
+            try:
+                self.client.head_bucket(Bucket=self.settings.storage_bucket)
+            except ClientError as exc:
+                code = exc.response["Error"]["Code"]
+                if code in {"404", "NoSuchBucket"}:
+                    # Bucket does not exist.  Try to create it automatically.
+                    # This succeeds for AWS S3 and MinIO.
+                    # For Cloudflare R2 the bucket must be created in the R2
+                    # dashboard first — creation via S3 API is not supported.
+                    self.client.create_bucket(Bucket=self.settings.storage_bucket)
+                else:
+                    raise
 
         await asyncio.to_thread(_ensure_bucket)
 
@@ -163,7 +177,7 @@ class StorageService:
                 self.client.generate_presigned_url(
                     "get_object",
                     Params={"Bucket": self.settings.storage_bucket, "Key": storage_key_or_url},
-                    ExpiresIn=3600,
+                    ExpiresIn=self.settings.storage_s3_presign_ttl,
                 ),
             )
             if self.settings.storage_s3_endpoint_url:

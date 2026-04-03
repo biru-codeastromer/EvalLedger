@@ -24,13 +24,13 @@ PostgreSQL (Render, free)     Redis (Render, free)
 | PostgreSQL 16 | ✅ Live | Render managed, free tier (256 MB, expires after 90 days) |
 | Redis | ✅ Live | Render managed, free tier (25 MB, expires after 90 days) |
 | Celery worker | ❌ Not deployed | Render free tier does not support background workers |
-| S3 object storage | ❌ Not configured | Local filesystem storage (ephemeral across redeploys) |
+| S3 object storage | ⚠️ Optional | Defaults to ephemeral local filesystem; configure Cloudflare R2 for durability |
 
 ### What this means in practice
 
 - **Registry browsing, search, benchmark creation, version submission** — all work normally.
 - **Contamination checks** — disabled. The API returns `status: "unavailable"` instead of queueing jobs that would never process. New benchmark versions are created with `contamination_status: "unchecked"`.
-- **Artifact storage** — uses the local filesystem. Uploaded artifacts are **lost on every redeploy**. Download URLs for previously uploaded versions will 404 after a redeploy.
+- **Artifact storage** — defaults to the local filesystem (`STORAGE_BACKEND=local`). Uploaded artifacts are **lost on every redeploy**. Configure Cloudflare R2 for durable storage — see [Durable artifact storage (Cloudflare R2)](#durable-artifact-storage-cloudflare-r2) below.
 - **Cold starts** — free instances spin down after 15 minutes of inactivity. The first request after spin-down takes 30–60 seconds.
 - **90-day expiry** — free PostgreSQL and Redis instances expire after 90 days and must be recreated.
 
@@ -126,7 +126,14 @@ Then redeploy the frontend from the Vercel Deployments tab.
 | `CELERY_RESULT_BACKEND` | Render Redis | Same as `REDIS_URL` |
 | `JWT_SECRET_KEY` | auto-generated | |
 | `CORS_ORIGINS` | static | `["https://evalledger-frontend.vercel.app"]` |
-| `STORAGE_BACKEND` | static | `local` |
+| `STORAGE_BACKEND` | static | `local` (default). Change to `s3` after configuring R2 |
+| `STORAGE_BUCKET` | static | `evalledger-artifacts` (your R2 bucket name) |
+| `STORAGE_S3_ENDPOINT_URL` | manual | R2 jurisdiction endpoint — only required when `STORAGE_BACKEND=s3` |
+| `STORAGE_S3_ACCESS_KEY_ID` | manual | R2 API token access key — only required when `STORAGE_BACKEND=s3` |
+| `STORAGE_S3_SECRET_ACCESS_KEY` | manual | R2 API token secret key — only required when `STORAGE_BACKEND=s3` |
+| `STORAGE_S3_PRESIGN_ENDPOINT` | manual | R2 public domain for presigned URLs — only required when `STORAGE_BACKEND=s3` |
+| `STORAGE_S3_REGION` | optional | `auto` for R2; region string for AWS S3 |
+| `STORAGE_S3_PRESIGN_TTL` | optional | Presigned URL TTL in seconds (default `3600`) |
 | `WORKER_ENABLED` | static | `false` — no Celery worker is deployed |
 | `APP_URL` | manual | Set after deploy (e.g. `https://evalledger-api.onrender.com`) |
 | `FRONTEND_URL` | static | `https://evalledger-frontend.vercel.app` |
@@ -315,13 +322,130 @@ To enable contamination processing, deploy a Celery worker and set `WORKER_ENABL
 
 ---
 
-## Storage (ephemeral)
+## Storage
 
-On Render free tier with `STORAGE_BACKEND=local`:
+### Ephemeral local storage (default)
+
+On Render free tier with `STORAGE_BACKEND=local` (the default):
 - Artifacts are stored in `/app/storage/` inside the container.
 - **This storage is ephemeral.** Files are lost on every redeploy or container restart.
 - Download endpoints will return 404 for artifacts that existed before the last deploy.
-- To enable durable storage, configure S3-compatible object storage (e.g. Cloudflare R2) and set `STORAGE_BACKEND=s3` with the appropriate credentials.
+
+To preserve artifacts across deploys, configure Cloudflare R2 as described below.
+
+---
+
+## Durable artifact storage (Cloudflare R2)
+
+Cloudflare R2 is an S3-compatible object storage with a generous free tier (10 GB storage, 10 M class-A ops/month, 1 M class-B ops/month) and **no egress fees**. It is the recommended production storage backend for EvalLedger.
+
+### 1. Create a Cloudflare account and enable R2
+
+1. Go to [https://dash.cloudflare.com](https://dash.cloudflare.com) and sign up (or log in).
+2. In the left sidebar, click **R2 Object Storage**.
+3. If prompted, enable R2 (you may need to add a payment method for identity verification; you will not be charged within the free tier).
+
+### 2. Create an R2 bucket
+
+1. Click **Create bucket**.
+2. Enter a bucket name, e.g. `evalledger-artifacts`.
+3. Leave the default region (**Automatic**).
+4. Click **Create bucket**.
+
+### 3. Enable a public access domain
+
+Presigned download URLs are rewritten to a public domain so browsers can fetch artifacts without the internal R2 endpoint leaking to clients.
+
+**Option A — R2.dev subdomain (easiest):**
+1. Open the bucket → **Settings** → **Public access**.
+2. Under **R2.dev subdomain**, click **Allow access** → **Allow**.
+3. Copy the generated subdomain, e.g. `https://pub-<hash>.r2.dev`.
+4. Use this as `STORAGE_S3_PRESIGN_ENDPOINT`.
+
+**Option B — Custom domain:**
+1. Open the bucket → **Settings** → **Custom domains** → **Connect domain**.
+2. Enter a domain you control (must be on the same Cloudflare account, e.g. `artifacts.yourdomain.com`).
+3. Click **Connect** and follow the DNS instructions.
+4. Use `https://artifacts.yourdomain.com` as `STORAGE_S3_PRESIGN_ENDPOINT`.
+
+### 4. Configure CORS (required for browser uploads)
+
+In the bucket → **Settings** → **CORS policy**, click **Add CORS rule** and paste:
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://evalledger-frontend.vercel.app"],
+    "AllowedMethods": ["GET", "PUT", "POST", "DELETE", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Replace `https://evalledger-frontend.vercel.app` with your actual frontend URL.
+
+### 5. Create an R2 API token
+
+1. Go to **R2** → **Manage R2 API tokens** (top right of the R2 overview page).
+2. Click **Create API token**.
+3. Give it a descriptive name, e.g. `evalledger-api`.
+4. Under **Permissions**, select **Object Read & Write**.
+5. Under **Specify bucket**, select your bucket (`evalledger-artifacts`).
+6. Click **Create API token**.
+7. Copy all three values shown — they are only displayed once:
+   - **Access Key ID** → `STORAGE_S3_ACCESS_KEY_ID`
+   - **Secret Access Key** → `STORAGE_S3_SECRET_ACCESS_KEY`
+   - **Jurisdiction-specific endpoint** → `STORAGE_S3_ENDPOINT_URL`
+     (looks like `https://<account-id>.r2.cloudflarestorage.com`)
+
+### 6. Set the environment variables in Render
+
+In the Render dashboard → `evalledger-api` → **Environment**, add or update:
+
+| Variable | Value |
+|---|---|
+| `STORAGE_BACKEND` | `s3` |
+| `STORAGE_BUCKET` | `evalledger-artifacts` (your bucket name) |
+| `STORAGE_S3_ENDPOINT_URL` | `https://<account-id>.r2.cloudflarestorage.com` |
+| `STORAGE_S3_ACCESS_KEY_ID` | from step 5 |
+| `STORAGE_S3_SECRET_ACCESS_KEY` | from step 5 |
+| `STORAGE_S3_PRESIGN_ENDPOINT` | `https://pub-<hash>.r2.dev` (from step 3) |
+| `STORAGE_S3_REGION` | `auto` (R2-specific; omit for AWS S3) |
+| `STORAGE_S3_PRESIGN_TTL` | `3600` (optional; default 1 hour) |
+
+> **Security:** Never commit these values. Always set them via the Render dashboard or a secrets manager.
+
+### 7. Trigger a redeploy
+
+In Render → `evalledger-api` → **Manual deploy** → **Deploy latest commit**. The startup log will include:
+
+```json
+{"message": "app.startup", "storage_backend": "s3", ...}
+```
+
+If credentials are missing or incorrect, the startup will log `app.startup_storage_failed` and the `/health` endpoint will report `"storage": false`.
+
+### Troubleshooting R2
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `app.startup_storage_failed` at boot | Wrong endpoint URL or bucket name | Verify `STORAGE_S3_ENDPOINT_URL` and `STORAGE_BUCKET` |
+| `403 Forbidden` from `head_bucket` | API token lacks permissions or wrong bucket scope | Re-create token with **Object Read & Write** scoped to the correct bucket |
+| Presigned URLs return 403 | Wrong `STORAGE_S3_PRESIGN_ENDPOINT` or public access not enabled | Enable R2.dev subdomain or custom domain and update the env var |
+| `STORAGE_BACKEND=s3 requires these env vars` at startup | One or more of the four required vars is blank | Check all four: endpoint URL, access key, secret key, presign endpoint |
+| Download URLs expose internal R2 endpoint | `STORAGE_S3_PRESIGN_ENDPOINT` not set | Set this to your R2.dev subdomain or custom domain |
+
+### Other S3-compatible providers
+
+The storage layer works with any S3-compatible provider. Use the same environment variable pattern and substitute provider-specific values:
+
+| Provider | `STORAGE_S3_ENDPOINT_URL` | `STORAGE_S3_REGION` | Notes |
+|---|---|---|---|
+| Cloudflare R2 | `https://<account-id>.r2.cloudflarestorage.com` | `auto` | No egress fees; recommended |
+| AWS S3 | *(omit — boto3 uses the default)* | e.g. `us-east-1` | Standard AWS credentials |
+| MinIO (local dev) | `http://localhost:9000` | `us-east-1` | Run via Docker; no cloud needed |
+| Tigris (Fly.io) | Fly provides the URL | `auto` | See `backend/fly.toml` |
 
 ---
 
