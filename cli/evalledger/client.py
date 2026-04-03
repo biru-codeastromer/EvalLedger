@@ -22,8 +22,6 @@ class EvalLedgerClient:
         headers = {"Accept": "application/json"}
         if self.config.api_key:
             headers["X-API-Key"] = self.config.api_key
-        elif self.config.access_token:
-            headers["Authorization"] = f"Bearer {self.config.access_token}"
         return headers
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
@@ -51,15 +49,9 @@ class EvalLedgerClient:
             raise EvalLedgerClientError("Unexpected response payload")
         return cast(dict[str, Any], payload)
 
-    def register(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._json_dict(self._request("POST", "/auth/register", json=payload))
-
-    def login(self, email: str, password: str) -> dict[str, Any]:
-        response = self._request("POST", "/auth/login", json={"email": email, "password": password})
-        return self._json_dict(response)
-
-    def create_api_key(self, name: str) -> dict[str, Any]:
-        return self._json_dict(self._request("POST", "/auth/api-keys", json={"name": name}))
+    def whoami(self) -> dict[str, Any]:
+        """Return the current user's profile. Used to validate an API key."""
+        return self._json_dict(self._request("GET", "/auth/me"))
 
     def search(self, query: str) -> dict[str, Any]:
         return self._json_dict(self._request("GET", "/search", params={"q": query}))

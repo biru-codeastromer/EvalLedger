@@ -50,41 +50,57 @@ def test_verify_command(monkeypatch) -> None:
     assert "VERIFIED" in result.stdout
 
 
-def test_login_command_saves_credentials(monkeypatch) -> None:
+def test_login_command_saves_api_key(monkeypatch) -> None:
+    """login validates the key against /auth/me and saves it to config."""
     saved = {}
 
     class FakeClient:
         def __init__(self, *_args, **_kwargs) -> None:
             pass
 
-        def login(self, _email: str, _password: str):
-            return {"access_token": "token-123"}
-
-        def create_api_key(self, _name: str):
-            return {"api_key": "el_key_123"}
+        def whoami(self):
+            return {"user": {"username": "alice", "email": "alice@example.com"}}
 
         def close(self) -> None:
             return None
 
     monkeypatch.setattr("evalledger.commands.login.EvalLedgerClient", FakeClient)
-    monkeypatch.setattr("evalledger.commands.login.Prompt.ask", lambda *_args, **_kwargs: "evalledger-cli")
     monkeypatch.setattr(
         "evalledger.commands.login.save_config",
-        lambda config: saved.update(
-            {
-                "endpoint": config.endpoint,
-                "email": config.email,
-                "access_token": config.access_token,
-                "api_key": config.api_key,
-            }
-        ),
+        lambda config: saved.update({"endpoint": config.endpoint, "api_key": config.api_key}),
     )
 
-    result = runner.invoke(
-        app,
-        ["login", "--email", "researcher@example.com", "--password", "password123"],
-    )
+    result = runner.invoke(app, ["login", "--api-key", "el_test_key_abc123"])
 
     assert result.exit_code == 0
-    assert saved["email"] == "researcher@example.com"
-    assert saved["api_key"] == "el_key_123"
+    assert saved["api_key"] == "el_test_key_abc123"
+    assert "alice" in result.stdout
+
+
+def test_login_command_rejects_bad_key_format(monkeypatch) -> None:
+    """login rejects keys that don't start with 'el_' before hitting the network."""
+    result = runner.invoke(app, ["login", "--api-key", "not-a-real-key"])
+    assert result.exit_code == 1
+    assert "el_" in result.output
+
+
+def test_login_command_handles_invalid_key(monkeypatch) -> None:
+    """login shows a helpful error when the API rejects the key."""
+    from evalledger.client import EvalLedgerClientError
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def whoami(self):
+            raise EvalLedgerClientError("API key is invalid")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr("evalledger.commands.login.EvalLedgerClient", FakeClient)
+
+    result = runner.invoke(app, ["login", "--api-key", "el_bad_key_000"])
+
+    assert result.exit_code == 1
+    assert "validation failed" in result.output.lower()
