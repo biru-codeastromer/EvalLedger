@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from json import JSONDecodeError
 from pathlib import Path
@@ -39,6 +40,7 @@ storage_service = StorageService.from_settings(settings)
 versioning_service = VersioningService()
 CitationFormatQuery = Annotated[str | None, Query()]
 
+_version_logger = logging.getLogger("evalledger.versions")
 _version_create_rl = Depends(RateLimit("version_create", anon_limit=10, auth_limit=10))
 
 
@@ -192,6 +194,17 @@ async def create_version(
     await session.commit()
     await session.refresh(version_record)
     await session.refresh(benchmark)
+
+    _version_logger.info(
+        "version.created",
+        extra={
+            "benchmark_slug": benchmark.slug,
+            "version": version,
+            "artifact_sha256": stored.sha256,
+            "size_bytes": stored.size_bytes,
+            "user_id": str(current_user.id),
+        },
+    )
 
     contamination_job_ids: list[str] = []
     if settings.worker_enabled:

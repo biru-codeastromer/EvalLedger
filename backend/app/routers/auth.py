@@ -8,6 +8,7 @@ inspecting the current user profile, minting API keys, and revoking them.
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -35,6 +36,8 @@ from app.security import (
 from app.services.audit import record_audit_event
 
 router = APIRouter()
+
+_auth_logger = logging.getLogger("evalledger.auth")
 
 # Rate limit buckets for auth endpoints (all callers are authenticated here,
 # so anon_limit == auth_limit keeps the logic simple).
@@ -80,6 +83,10 @@ async def create_api_key(
     )
     await session.commit()
     await session.refresh(api_key)
+    _auth_logger.info(
+        "api_key.created",
+        extra={"user_id": str(current_user.id), "key_name": payload.name},
+    )
     return APIKeyCreateResponse(api_key=plain_key, metadata=APIKeyResponse.model_validate(api_key))
 
 
@@ -94,6 +101,10 @@ async def deactivate_api_key(
     if api_key is None:
         raise AppError("api_key_not_found", "API key does not exist", status_code=404)
     api_key.is_active = False
+    _auth_logger.info(
+        "api_key.revoked",
+        extra={"user_id": str(current_user.id), "key_id": api_key_id, "key_name": api_key.name},
+    )
     await record_audit_event(
         session,
         action="api_key.revoked",

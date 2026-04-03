@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -8,6 +9,8 @@ from fastapi import UploadFile
 
 from app.config import Settings, get_settings
 from app.errors import AppError
+
+_upload_logger = logging.getLogger("evalledger.uploads")
 
 
 @dataclass(slots=True)
@@ -28,11 +31,21 @@ def validate_upload_name(filename: str | None, settings: Settings | None = None)
     current_settings = settings or get_settings()
     safe_name = Path(filename or "artifact.bin").name.strip()
     if safe_name in {"", ".", ".."}:
+        _upload_logger.warning(
+            "upload.invalid_filename", extra={"artifact_filename": filename, "reason": "unsafe_name"}
+        )
         raise AppError("invalid_filename", "A valid artifact filename is required", status_code=400)
     if len(safe_name) > 255:
+        _upload_logger.warning(
+            "upload.invalid_filename", extra={"artifact_filename": safe_name[:64], "reason": "name_too_long"}
+        )
         raise AppError("invalid_filename", "Artifact filename is too long", status_code=400)
     suffix = Path(safe_name).suffix.lower()
     if suffix not in set(current_settings.allowed_artifact_extensions):
+        _upload_logger.warning(
+            "upload.unsupported_extension",
+            extra={"artifact_filename": safe_name, "suffix": suffix},
+        )
         raise AppError(
             "unsupported_artifact",
             "Artifacts must be one of: json, jsonl, csv, or parquet",
@@ -51,6 +64,10 @@ def validate_upload_file(
     safe_name = validate_upload_name(upload.filename, current_settings)
     size_bytes = _measure_size(upload.file)
     if size_bytes <= 0:
+        _upload_logger.warning(
+            "upload.empty_artifact",
+            extra={"artifact_filename": safe_name, "size_bytes": size_bytes},
+        )
         raise AppError("empty_artifact", "Uploaded artifacts cannot be empty", status_code=400)
     max_bytes = (
         current_settings.max_authenticated_upload_bytes
@@ -58,6 +75,15 @@ def validate_upload_file(
         else current_settings.max_public_upload_bytes
     )
     if size_bytes > max_bytes:
+        _upload_logger.warning(
+            "upload.artifact_too_large",
+            extra={
+                "artifact_filename": safe_name,
+                "size_bytes": size_bytes,
+                "max_bytes": max_bytes,
+                "authenticated": authenticated,
+            },
+        )
         if authenticated:
             raise AppError(
                 "artifact_too_large",

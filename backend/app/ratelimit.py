@@ -174,6 +174,10 @@ class RateLimiter:
                 await self._redis.expire(key, window_seconds * 2)
             if count > limit:
                 retry_after = window_seconds - (int(time.time()) % window_seconds)
+                logger.warning(
+                    "ratelimit.throttled",
+                    extra={"bucket": name, "client_id": client_id, "limit": limit},
+                )
                 raise RateLimitError(retry_after=max(1, retry_after))
         except RateLimitError:
             raise

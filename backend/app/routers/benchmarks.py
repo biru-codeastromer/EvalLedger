@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -23,6 +24,7 @@ from app.services.audit import record_audit_event
 
 router = APIRouter()
 
+_benchmark_logger = logging.getLogger("evalledger.benchmarks")
 _benchmark_create_rl = Depends(RateLimit("benchmark_create", anon_limit=20, auth_limit=20))
 
 
@@ -123,6 +125,10 @@ async def create_benchmark(
         .where(Benchmark.id == benchmark.id)
     )
     assert created is not None
+    _benchmark_logger.info(
+        "benchmark.created",
+        extra={"benchmark_slug": benchmark.slug, "user_id": str(current_user.id)},
+    )
     item = _benchmark_item(created)
     return BenchmarkDetail(**item.model_dump(), submitter=created.submitter)
 

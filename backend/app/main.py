@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from time import perf_counter
@@ -25,8 +26,29 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    configure_logging()
-    await StorageService.from_settings(settings).ensure_ready()
+    configure_logging(
+        log_level=settings.log_level,
+        log_health_requests=settings.log_health_requests,
+    )
+    logger.info(
+        "app.startup",
+        extra={
+            "app_env": settings.app_env,
+            "app_version": "0.1.0",
+            "worker_enabled": settings.worker_enabled,
+            "rate_limit_enabled": settings.rate_limit_enabled,
+            "storage_backend": settings.storage_backend,
+            # Render injects RENDER_GIT_COMMIT at deploy time; falls back to
+            # "unknown" in local/test environments.
+            "git_commit": os.environ.get("RENDER_GIT_COMMIT", "unknown"),
+        },
+    )
+
+    try:
+        await StorageService.from_settings(settings).ensure_ready()
+    except Exception:
+        logger.error("app.startup_storage_failed", exc_info=True)
+
     # Attach a shared Redis client to the rate-limiter module.  Failures here
     # are non-fatal: set_limiter(None) keeps the limiter in fail-open mode.
     redis_client: Redis | None = None
@@ -41,6 +63,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        logger.info("app.shutdown")
         set_limiter(None)
         if redis_client is not None:
             await redis_client.aclose()
@@ -68,6 +91,11 @@ register_exception_handlers(app)
 async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     request_id = request.headers.get("x-request-id") or uuid4().hex
     request.state.request_id = request_id
+    # Prefer X-Forwarded-For (Render proxy) over direct client host for IP logging.
+    client_ip = (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
     started_at = perf_counter()
     try:
         response = await call_next(request)
@@ -81,6 +109,7 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
                 "path": request.url.path,
                 "status_code": 500,
                 "duration_ms": duration_ms,
+                "client_ip": client_ip,
             },
         )
         raise
@@ -93,6 +122,7 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
             "path": request.url.path,
             "status_code": response.status_code,
             "duration_ms": duration_ms,
+            "client_ip": client_ip,
         },
     )
     response.headers["X-Request-ID"] = request_id

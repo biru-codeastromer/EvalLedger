@@ -60,6 +60,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         request_id = getattr(request.state, "request_id", None)
         if request_id is not None:
             details.setdefault("request_id", request_id)
+
+        log_extra: dict[str, Any] = {
+            "request_id": request_id,
+            "error_code": exc.code,
+            "status_code": exc.status_code,
+            "method": request.method,
+            "path": request.url.path,
+        }
+        if exc.status_code >= 500:
+            logger.error("app_error.server_error", extra=log_extra)
+        elif exc.status_code == 429:
+            logger.warning("ratelimit.request_throttled", extra=log_extra)
+        elif exc.status_code in (401, 403):
+            logger.warning("app_error.auth_rejected", extra=log_extra)
+        # Other 4xx are ordinary client errors; logged at request.completed level.
+
         response = error_response(
             exc.code,
             exc.message,
@@ -78,6 +94,15 @@ def register_exception_handlers(app: FastAPI) -> None:
         request_id = getattr(request.state, "request_id", None)
         if request_id is not None:
             detail.setdefault("request_id", request_id)
+        if exc.status_code >= 500:
+            logger.error(
+                "http_error.server_error",
+                extra={
+                    "request_id": request_id,
+                    "status_code": exc.status_code,
+                    "path": request.url.path,
+                },
+            )
         return error_response(
             "http_error",
             detail.get("detail", "Request failed"),
@@ -87,9 +112,16 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(IntegrityError)
     async def handle_integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
-        logger.warning("database.integrity_error", extra={"error": str(exc.orig)})
-        details: dict[str, Any] | None = None
         request_id = getattr(request.state, "request_id", None)
+        logger.warning(
+            "database.integrity_error",
+            extra={
+                "request_id": request_id,
+                "error": str(exc.orig),
+                "path": request.url.path,
+            },
+        )
+        details: dict[str, Any] | None = None
         if request_id is not None:
             details = {"request_id": request_id}
         return error_response(
@@ -101,9 +133,16 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("request.unhandled_exception")
-        details: dict[str, Any] | None = None
         request_id = getattr(request.state, "request_id", None)
+        logger.exception(
+            "request.unhandled_exception",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+            },
+        )
+        details: dict[str, Any] | None = None
         if request_id is not None:
             details = {"request_id": request_id}
         return error_response(

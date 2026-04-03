@@ -11,6 +11,7 @@ No external session store is required.
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlencode
 
 import httpx
@@ -26,6 +27,8 @@ from app.services.oauth import find_or_create_oauth_user
 
 router = APIRouter()
 settings = get_settings()
+
+_oauth_logger = logging.getLogger("evalledger.oauth")
 
 # --------------------------------------------------------------------------- #
 # State-token helpers                                                          #
@@ -58,6 +61,16 @@ def _frontend_error_redirect(message: str) -> RedirectResponse:
     """Redirect the browser to the frontend login page with an error message."""
     params = urlencode({"error": message})
     return RedirectResponse(f"{settings.frontend_url}/login?{params}", status_code=302)
+
+
+def _req_id(request: Request) -> str | None:
+    """Return the request-id from state (set by the request_context middleware).
+
+    Returns None if the state object is absent (e.g. in direct unit tests that
+    bypass the HTTP middleware stack).
+    """
+    state = getattr(request, "state", None)
+    return getattr(state, "request_id", None) if state is not None else None
 
 
 async def _oauth_rate_limit(request: Request, bucket: str) -> RedirectResponse | None:
@@ -95,6 +108,7 @@ async def github_oauth_start(request: Request) -> RedirectResponse:
         return rate_limit_response
     if not settings.github_client_id:
         raise AppError("oauth_not_configured", "GitHub OAuth is not configured on this server", status_code=503)
+    _oauth_logger.info("oauth.flow_start", extra={"provider": "github", "request_id": _req_id(request)})
     state = _make_state_token()
     params = urlencode(
         {
@@ -119,14 +133,26 @@ async def github_oauth_callback(
     if (rate_limit_response := await _oauth_rate_limit(request, "oauth_callback_github")) is not None:
         return rate_limit_response
     if error:
+        _oauth_logger.warning(
+            "oauth.callback_provider_error",
+            extra={"provider": "github", "error": error, "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect(f"GitHub login was denied: {error}")
 
     if not code or not state:
+        _oauth_logger.warning(
+            "oauth.callback_missing_params",
+            extra={"provider": "github", "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect("GitHub did not return the expected code or state.")
 
     try:
         _verify_state_token(state)
     except AppError:
+        _oauth_logger.warning(
+            "oauth.state_mismatch",
+            extra={"provider": "github", "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect("OAuth state mismatch — please try signing in again.")
 
     async with httpx.AsyncClient(timeout=10) as client:
@@ -144,6 +170,10 @@ async def github_oauth_callback(
         token_data = token_resp.json()
         github_token = token_data.get("access_token")
         if not github_token:
+            _oauth_logger.warning(
+                "oauth.token_exchange_failed",
+                extra={"provider": "github", "request_id": _req_id(request)},
+            )
             return _frontend_error_redirect("GitHub did not return an access token. Please try again.")
 
         gh_headers = {
@@ -154,6 +184,10 @@ async def github_oauth_callback(
         # Fetch the authenticated user's profile.
         user_resp = await client.get(_GITHUB_USER_URL, headers=gh_headers)
         if user_resp.status_code != 200:
+            _oauth_logger.warning(
+                "oauth.profile_fetch_failed",
+                extra={"provider": "github", "status": user_resp.status_code, "request_id": _req_id(request)},
+            )
             return _frontend_error_redirect("Could not retrieve your GitHub profile.")
         gh_user = user_resp.json()
 
@@ -180,8 +214,16 @@ async def github_oauth_callback(
         await session.commit()
         await session.refresh(user)
     except Exception:
+        _oauth_logger.exception(
+            "oauth.account_creation_failed",
+            extra={"provider": "github", "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect("Failed to create or retrieve your EvalLedger account.")
 
+    _oauth_logger.info(
+        "oauth.login_success",
+        extra={"provider": "github", "user_id": str(user.id), "request_id": _req_id(request)},
+    )
     token = create_access_token(str(user.id))
     return RedirectResponse(
         f"{settings.frontend_url}/auth/callback?token={token}",
@@ -205,6 +247,7 @@ async def google_oauth_start(request: Request) -> RedirectResponse:
         return rate_limit_response
     if not settings.google_client_id:
         raise AppError("oauth_not_configured", "Google OAuth is not configured on this server", status_code=503)
+    _oauth_logger.info("oauth.flow_start", extra={"provider": "google", "request_id": _req_id(request)})
     state = _make_state_token()
     params = urlencode(
         {
@@ -231,14 +274,26 @@ async def google_oauth_callback(
     if (rate_limit_response := await _oauth_rate_limit(request, "oauth_callback_google")) is not None:
         return rate_limit_response
     if error:
+        _oauth_logger.warning(
+            "oauth.callback_provider_error",
+            extra={"provider": "google", "error": error, "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect(f"Google login was denied: {error}")
 
     if not code or not state:
+        _oauth_logger.warning(
+            "oauth.callback_missing_params",
+            extra={"provider": "google", "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect("Google did not return the expected code or state.")
 
     try:
         _verify_state_token(state)
     except AppError:
+        _oauth_logger.warning(
+            "oauth.state_mismatch",
+            extra={"provider": "google", "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect("OAuth state mismatch — please try signing in again.")
 
     async with httpx.AsyncClient(timeout=10) as client:
@@ -254,10 +309,18 @@ async def google_oauth_callback(
             },
         )
         if token_resp.status_code != 200:
+            _oauth_logger.warning(
+                "oauth.token_exchange_failed",
+                extra={"provider": "google", "status": token_resp.status_code, "request_id": _req_id(request)},
+            )
             return _frontend_error_redirect("Google token exchange failed. Please try again.")
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
         if not access_token:
+            _oauth_logger.warning(
+                "oauth.token_exchange_failed",
+                extra={"provider": "google", "request_id": _req_id(request)},
+            )
             return _frontend_error_redirect("Google did not return an access token.")
 
         # Fetch the user info with the access token.
@@ -266,6 +329,10 @@ async def google_oauth_callback(
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if info_resp.status_code != 200:
+            _oauth_logger.warning(
+                "oauth.profile_fetch_failed",
+                extra={"provider": "google", "status": info_resp.status_code, "request_id": _req_id(request)},
+            )
             return _frontend_error_redirect("Could not retrieve your Google profile.")
         g_user = info_resp.json()
 
@@ -290,8 +357,16 @@ async def google_oauth_callback(
         await session.commit()
         await session.refresh(user)
     except Exception:
+        _oauth_logger.exception(
+            "oauth.account_creation_failed",
+            extra={"provider": "google", "request_id": _req_id(request)},
+        )
         return _frontend_error_redirect("Failed to create or retrieve your EvalLedger account.")
 
+    _oauth_logger.info(
+        "oauth.login_success",
+        extra={"provider": "google", "user_id": str(user.id), "request_id": _req_id(request)},
+    )
     token = create_access_token(str(user.id))
     return RedirectResponse(
         f"{settings.frontend_url}/auth/callback?token={token}",

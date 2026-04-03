@@ -135,6 +135,8 @@ Then redeploy the frontend from the Vercel Deployments tab.
 | `GOOGLE_CLIENT_ID` | manual | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | manual | Google OAuth client secret |
 | `RATE_LIMIT_ENABLED` | static | `true` — set to `false` only in test/staging environments |
+| `LOG_LEVEL` | optional | `INFO` (default). Set to `DEBUG` for verbose local dev; never use `DEBUG` in production |
+| `LOG_HEALTH_REQUESTS` | optional | `false` (default). Set to `true` only when debugging liveness probe failures |
 
 ### Vercel
 
@@ -142,6 +144,105 @@ Then redeploy the frontend from the Vercel Deployments tab.
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `https://evalledger-api.onrender.com` |
 | `API_INTERNAL_URL` | `https://evalledger-api.onrender.com` |
+
+---
+
+## Observability
+
+### Log format
+
+All log lines are emitted as JSON to stdout. Render's log dashboard displays them inline; the raw stream can be tailed with `render logs --tail`.
+
+Every record includes the standard JSON fields emitted by `pythonjsonlogger`:
+
+| Field | Notes |
+|---|---|
+| `asctime` | ISO-8601 timestamp |
+| `levelname` | `INFO` / `WARNING` / `ERROR` |
+| `name` | Logger name (e.g. `evalledger.auth`) |
+| `message` | Event name (e.g. `request.completed`) |
+
+Structured fields are appended as additional top-level keys depending on the event. Key fields:
+
+| Field | Present on |
+|---|---|
+| `request_id` | Every request, most error events |
+| `method` + `path` | `request.completed`, error handlers |
+| `status_code` | `request.completed`, error handlers |
+| `duration_ms` | `request.completed` |
+| `client_ip` | `request.completed` (X-Forwarded-For or direct) |
+| `user_id` | Auth events, API key events, OAuth logins, version/benchmark creation |
+| `benchmark_slug` | Benchmark and version creation |
+| `version` + `artifact_sha256` | Version creation |
+| `provider` | OAuth events |
+| `error_code` | AppError events |
+| `bucket` + `client_id` | Rate-limit throttle events |
+
+### Event catalogue
+
+| Event | Logger | Level | Meaning |
+|---|---|---|---|
+| `app.startup` | `evalledger` | INFO | Application started; includes `app_env`, `git_commit`, feature flags |
+| `app.shutdown` | `evalledger` | INFO | Application stopping cleanly |
+| `app.startup_storage_failed` | `evalledger` | ERROR | Storage backend not reachable at startup |
+| `ratelimit.redis_connected` | `evalledger` | INFO | Redis connected for rate limiting |
+| `ratelimit.redis_unavailable` | `evalledger` | WARNING | Redis unreachable; rate limiting in fail-open mode |
+| `ratelimit.throttled` | `evalledger.ratelimit` | WARNING | A client exceeded a rate-limit bucket |
+| `ratelimit.request_throttled` | `evalledger.errors` | WARNING | 429 AppError surfaced to the client |
+| `request.completed` | `evalledger` | INFO | Every HTTP request (except `/health/live` when filtered) |
+| `request.unhandled_exception` | `evalledger.errors` | ERROR | Uncaught exception (with stack trace) |
+| `app_error.server_error` | `evalledger.errors` | ERROR | 5xx AppError |
+| `app_error.auth_rejected` | `evalledger.errors` | WARNING | 401 / 403 AppError |
+| `database.integrity_error` | `evalledger.errors` | WARNING | DB constraint violation |
+| `http_error.server_error` | `evalledger.errors` | ERROR | 5xx HTTPException |
+| `auth.api_key_invalid` | `evalledger.auth` | WARNING | API key not found or inactive |
+| `auth.invalid_token` | `evalledger.auth` | WARNING | JWT decode failure |
+| `auth.invalid_auth_header` | `evalledger.auth` | WARNING | Malformed Authorization header |
+| `auth.user_not_found` | `evalledger.auth` | WARNING | JWT subject not in DB |
+| `api_key.created` | `evalledger.auth` | INFO | User created an API key |
+| `api_key.revoked` | `evalledger.auth` | INFO | User revoked an API key |
+| `oauth.flow_start` | `evalledger.oauth` | INFO | User initiated OAuth login |
+| `oauth.login_success` | `evalledger.oauth` | INFO | OAuth login completed; user created or linked |
+| `oauth.callback_provider_error` | `evalledger.oauth` | WARNING | Provider returned an error param |
+| `oauth.callback_missing_params` | `evalledger.oauth` | WARNING | Code or state absent from callback |
+| `oauth.state_mismatch` | `evalledger.oauth` | WARNING | CSRF state token invalid or expired |
+| `oauth.token_exchange_failed` | `evalledger.oauth` | WARNING | Provider token exchange returned no token |
+| `oauth.profile_fetch_failed` | `evalledger.oauth` | WARNING | Provider profile API returned non-200 |
+| `oauth.account_creation_failed` | `evalledger.oauth` | ERROR | DB error during find-or-create |
+| `benchmark.created` | `evalledger.benchmarks` | INFO | New benchmark registered |
+| `version.created` | `evalledger.versions` | INFO | New benchmark version submitted |
+| `contamination.check_unavailable` | `evalledger.contamination` | INFO | Check requested but worker disabled |
+| `upload.invalid_filename` | `evalledger.uploads` | WARNING | Bad or unsafe artifact filename |
+| `upload.unsupported_extension` | `evalledger.uploads` | WARNING | File extension not allowed |
+| `upload.empty_artifact` | `evalledger.uploads` | WARNING | Zero-byte upload rejected |
+| `upload.artifact_too_large` | `evalledger.uploads` | WARNING | Upload exceeds size limit |
+| `health.database_failed` | `evalledger` | ERROR | `GET /health` DB probe failed |
+| `health.redis_failed` | `evalledger` | ERROR | `GET /health` Redis probe failed |
+| `health.storage_failed` | `evalledger` | ERROR | `GET /health` storage probe failed |
+
+### Health endpoints
+
+| Endpoint | Purpose | Frequency |
+|---|---|---|
+| `GET /health/live` | Liveness — is the process running? Used by Render for autorestart. Logs suppressed by default (`LOG_HEALTH_REQUESTS=false`). | Every ~30 s |
+| `GET /health` | Readiness — checks database, Redis, and storage. Returns `{"status":"ok"}` or `{"status":"degraded","checks":{...}}` with HTTP 200/503. Use this for manual triage, not for automated polling. | On-demand |
+
+### Sensitive data policy
+
+The following are **never** logged:
+- Raw API keys or key prefixes (only the hashed client-id appears in rate-limit logs)
+- OAuth access tokens or refresh tokens
+- JWT token values
+- Uploaded file contents
+- `SECRET_KEY`, `CLIENT_SECRET`, or any credential env vars
+
+### Log level configuration
+
+| `LOG_LEVEL` | When to use |
+|---|---|
+| `INFO` | Production (default) |
+| `WARNING` | Reduce noise if INFO volume is too high |
+| `DEBUG` | Local development only — **never in production** |
 
 ---
 

@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    # Logging
+    # LOG_LEVEL controls the root log level (DEBUG / INFO / WARNING / ERROR).
+    # LOG_HEALTH_REQUESTS=false suppresses /health/live polling from the log stream
+    # to avoid noise from Render's 30-second liveness probes.
+    log_level: str = "INFO"
+    log_health_requests: bool = False
+
     # Rate limiting — set to false to disable globally (e.g. in integration tests).
     # When enabled, a Redis-backed fixed-window limiter is applied to public
     # and write endpoints.  See app/ratelimit.py for bucket definitions.

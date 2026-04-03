@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated
@@ -28,6 +29,7 @@ settings = get_settings()
 storage_service = StorageService.from_settings(settings)
 
 _check_rl = Depends(RateLimit("contamination_check", anon_limit=10, auth_limit=20))
+_contamination_logger = logging.getLogger("evalledger.contamination")
 
 
 def _parse_corpus_ids(raw_value: str | None) -> list[str]:
@@ -65,6 +67,10 @@ async def run_check(
     current_user: OptionalUser = None,
 ) -> ContaminationCheckResponse:
     if not settings.worker_enabled:
+        _contamination_logger.info(
+            "contamination.check_unavailable",
+            extra={"artifact_filename": artifact.filename or "unknown", "authenticated": current_user is not None},
+        )
         return ContaminationCheckResponse(
             job_id="",
             status="unavailable",
