@@ -1,7 +1,9 @@
 import {
+  AdminStats,
   APIKeyMetadata,
   AuditEvent,
   BenchmarkDetail,
+  BenchmarkReviewContext,
   BenchmarkVerificationResponse,
   BenchmarkListItem,
   ContaminationReport,
@@ -9,6 +11,7 @@ import {
   MeResponse,
   OverviewStats,
   RecentSubmission,
+  ReviewQueueItem,
   VersionDetail
 } from "@/lib/types";
 import { getAccessToken } from "@/lib/session";
@@ -194,8 +197,8 @@ export async function revokeApiKey(id: string): Promise<void> {
   }
 }
 
-export async function getReviewQueue(): Promise<BenchmarkDetail[]> {
-  return fetchJSON<BenchmarkDetail[]>("/admin/review-queue", undefined, true, true);
+export async function getReviewQueue(status: "pending" | "verified" | "all" = "pending"): Promise<ReviewQueueItem[]> {
+  return fetchJSON<ReviewQueueItem[]>(`/admin/review-queue?status=${status}`, undefined, true, true);
 }
 
 export async function getAdminAuditEvents(): Promise<AuditEvent[]> {
@@ -213,4 +216,21 @@ export async function setBenchmarkVerification(
     body: JSON.stringify({ verified, note })
   });
   return parseResponse<BenchmarkVerificationResponse>(response);
+}
+
+export async function getAdminStats(): Promise<AdminStats> {
+  return fetchJSON<AdminStats>("/admin/stats", undefined, true, true);
+}
+
+export async function addReviewNote(slug: string, note: string): Promise<BenchmarkVerificationResponse> {
+  const response = await fetch(`${getBaseUrl(true)}/admin/benchmarks/${slug}/notes`, {
+    method: "POST",
+    headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ note })
+  });
+  return parseResponse<BenchmarkVerificationResponse>(response);
+}
+
+export async function getBenchmarkReviewContext(slug: string): Promise<BenchmarkReviewContext> {
+  return fetchJSON<BenchmarkReviewContext>(`/admin/benchmarks/${slug}/context`, undefined, true, true);
 }

@@ -35,8 +35,19 @@ class Benchmark(Base):
     total_versions: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     total_citations: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
+    # Review tracking — updated on each verification decision or standalone note.
+    # Persisted on the benchmark for quick UI access without scanning audit logs.
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
+    )
 
-    submitter: Mapped[User | None] = relationship(back_populates="benchmarks")
+    # Two FK paths to users require explicit foreign_keys= on each relationship.
+    submitter: Mapped[User | None] = relationship(
+        back_populates="benchmarks", foreign_keys=[submitter_id]
+    )
+    reviewed_by: Mapped[User | None] = relationship(foreign_keys=[reviewed_by_id])
     versions: Mapped[list[BenchmarkVersion]] = relationship(
         back_populates="benchmark", cascade="all, delete-orphan", order_by="BenchmarkVersion.created_at.desc()"
     )

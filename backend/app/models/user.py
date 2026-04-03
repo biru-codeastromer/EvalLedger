@@ -34,7 +34,11 @@ class User(Base):
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
-    benchmarks: Mapped[list[Benchmark]] = relationship(back_populates="submitter")
+    # Two FK paths from Benchmark to User (submitter_id and reviewed_by_id)
+    # require foreign_keys= to be explicit on both sides of the relationship.
+    benchmarks: Mapped[list[Benchmark]] = relationship(
+        back_populates="submitter", foreign_keys="[Benchmark.submitter_id]"
+    )
     versions: Mapped[list[BenchmarkVersion]] = relationship(back_populates="submitter")
     api_keys: Mapped[list[APIKey]] = relationship(back_populates="user")
     audit_events: Mapped[list[AuditEvent]] = relationship(back_populates="actor")

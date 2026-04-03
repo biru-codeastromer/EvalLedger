@@ -159,6 +159,43 @@ export interface MeResponse {
   recent_activity: AuditEvent[];
 }
 
+export interface ReviewQueueItem extends BenchmarkDetail {
+  review_note: string | null;
+  reviewed_at: string | null;
+  reviewed_by: { id: string; username: string; display_name?: string | null; affiliation?: string | null; is_verified: boolean } | null;
+  submitter_providers: string[];
+  latest_artifact_sha256: string | null;
+  latest_artifact_size_bytes: number | null;
+}
+
+export interface AdminStats {
+  total_benchmarks: number;
+  unverified_count: number;
+  verified_count: number;
+  contamination_pending_count: number;
+  contamination_flagged_count: number;
+}
+
+export interface VersionReviewSummary {
+  id: string;
+  version: string;
+  contamination_status: ContaminationStatus;
+  artifact_sha256: string | null;
+  artifact_size_bytes: number | null;
+  num_examples: number | null;
+  license: string | null;
+  paper_url: string | null;
+  github_url: string | null;
+  created_at: string;
+  released_at: string | null;
+  submitter: { username: string; display_name?: string | null; affiliation?: string | null; is_verified: boolean } | null;
+}
+
+export interface BenchmarkReviewContext extends ReviewQueueItem {
+  versions: VersionReviewSummary[];
+  audit_history: AuditEvent[];
+}
+
 export interface BenchmarkVerificationResponse {
-  benchmark: BenchmarkDetail;
+  benchmark: ReviewQueueItem;
 }
