@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    # Rate limiting — set to false to disable globally (e.g. in integration tests).
+    # When enabled, a Redis-backed fixed-window limiter is applied to public
+    # and write endpoints.  See app/ratelimit.py for bucket definitions.
+    rate_limit_enabled: bool = True
+
     # Set to true only when a Celery worker process is actually deployed.
     # On Render free tier (API-only), this remains false and contamination
     # checks return an "unavailable" status instead of queuing forever.

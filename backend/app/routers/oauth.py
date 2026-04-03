@@ -14,12 +14,13 @@ from __future__ import annotations
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
 from app.config import get_settings
 from app.dependencies import SessionDep
 from app.errors import AppError
+from app.ratelimit import RateLimiter, RateLimitError, get_client_id, get_limiter
 from app.security import create_access_token, decode_access_token
 from app.services.oauth import find_or_create_oauth_user
 
@@ -59,6 +60,24 @@ def _frontend_error_redirect(message: str) -> RedirectResponse:
     return RedirectResponse(f"{settings.frontend_url}/login?{params}", status_code=302)
 
 
+async def _oauth_rate_limit(request: Request, bucket: str) -> RedirectResponse | None:
+    """Return a redirect response if the OAuth start endpoint is over limit.
+
+    OAuth start routes return ``RedirectResponse``, so they cannot raise a
+    standard JSON ``AppError``.  Instead, over-limit requests are bounced back
+    to the login page with an error query parameter.
+
+    Returns ``None`` if the request is within the allowed rate.
+    """
+    limiter = RateLimiter(get_limiter(), enabled=settings.rate_limit_enabled)
+    client_id = get_client_id(request)
+    try:
+        await limiter.check(bucket, client_id, limit=20, window_seconds=60)
+    except RateLimitError:
+        return _frontend_error_redirect("Too many sign-in attempts — please wait a moment and try again.")
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # GitHub                                                                       #
 # --------------------------------------------------------------------------- #
@@ -70,8 +89,10 @@ _GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
 
 
 @router.get("/github")
-async def github_oauth_start() -> RedirectResponse:
+async def github_oauth_start(request: Request) -> RedirectResponse:
     """Redirect the user to the GitHub OAuth consent screen."""
+    if (rate_limit_response := await _oauth_rate_limit(request, "oauth_start_github")) is not None:
+        return rate_limit_response
     if not settings.github_client_id:
         raise AppError("oauth_not_configured", "GitHub OAuth is not configured on this server", status_code=503)
     state = _make_state_token()
@@ -175,8 +196,10 @@ _GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
 
 @router.get("/google")
-async def google_oauth_start() -> RedirectResponse:
+async def google_oauth_start(request: Request) -> RedirectResponse:
     """Redirect the user to the Google OAuth consent screen."""
+    if (rate_limit_response := await _oauth_rate_limit(request, "oauth_start_google")) is not None:
+        return rate_limit_response
     if not settings.google_client_id:
         raise AppError("oauth_not_configured", "Google OAuth is not configured on this server", status_code=503)
     state = _make_state_token()

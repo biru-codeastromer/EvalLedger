@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -8,6 +10,7 @@ from app.dependencies import CurrentUser, SessionDep
 from app.errors import AppError
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
+from app.ratelimit import RateLimit
 from app.schemas.audit import AuditEventResponse
 from app.schemas.benchmark import (
     BenchmarkCreate,
@@ -19,6 +22,8 @@ from app.schemas.benchmark import (
 from app.services.audit import record_audit_event
 
 router = APIRouter()
+
+_benchmark_create_rl = Depends(RateLimit("benchmark_create", anon_limit=20, auth_limit=20))
 
 
 def _benchmark_item(benchmark: Benchmark) -> BenchmarkListItem:
@@ -85,6 +90,7 @@ async def create_benchmark(
     payload: BenchmarkCreate,
     session: SessionDep,
     current_user: CurrentUser,
+    _rl: Annotated[None, _benchmark_create_rl] = None,
 ) -> BenchmarkDetail:
     existing = await session.scalar(select(Benchmark).where(Benchmark.slug == payload.slug))
     if existing is not None:

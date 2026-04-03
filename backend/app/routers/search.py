@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import SessionDep
 from app.models.benchmark import Benchmark
+from app.ratelimit import RateLimit
 from app.schemas.benchmark import BenchmarkListItem, BenchmarkListResponse
 
 router = APIRouter()
@@ -18,6 +19,8 @@ TaskTypeFilter = Annotated[str | None, Query()]
 StatusFilter = Annotated[str | None, Query()]
 PageNumber = Annotated[int, Query(ge=1)]
 PageSize = Annotated[int, Query(ge=1, le=100)]
+
+_search_rl = Depends(RateLimit("search", anon_limit=60, auth_limit=120))
 
 
 def _build_item(benchmark: Benchmark) -> BenchmarkListItem:
@@ -43,6 +46,7 @@ def _build_item(benchmark: Benchmark) -> BenchmarkListItem:
 @router.get("/search", response_model=BenchmarkListResponse)
 async def search_benchmarks(
     session: SessionDep,
+    _rl: Annotated[None, _search_rl] = None,
     q: SearchTerm = "",
     domain: DomainFilter = None,
     task_type: TaskTypeFilter = None,

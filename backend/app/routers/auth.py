@@ -8,7 +8,9 @@ inspecting the current user profile, minting API keys, and revoking them.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -17,6 +19,7 @@ from app.errors import AppError
 from app.models.api_key import APIKey
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
+from app.ratelimit import RateLimit
 from app.schemas.audit import AuditEventResponse
 from app.schemas.auth import (
     APIKeyCreateRequest,
@@ -32,6 +35,12 @@ from app.security import (
 from app.services.audit import record_audit_event
 
 router = APIRouter()
+
+# Rate limit buckets for auth endpoints (all callers are authenticated here,
+# so anon_limit == auth_limit keeps the logic simple).
+_me_rl = Depends(RateLimit("auth_me", anon_limit=30, auth_limit=30))
+_apikey_create_rl = Depends(RateLimit("auth_apikey_create", anon_limit=10, auth_limit=10))
+_apikey_delete_rl = Depends(RateLimit("auth_apikey_delete", anon_limit=10, auth_limit=10))
 
 
 def _auth_user_payload(user: object) -> dict[str, object]:
@@ -54,6 +63,7 @@ async def create_api_key(
     payload: APIKeyCreateRequest,
     session: SessionDep,
     current_user: CurrentUser,
+    _rl: Annotated[None, _apikey_create_rl] = None,
 ) -> APIKeyCreateResponse:
     plain_key = generate_api_key()
     api_key = APIKey(user_id=current_user.id, name=payload.name, key_hash=hash_api_key(plain_key))
@@ -74,7 +84,12 @@ async def create_api_key(
 
 
 @router.delete("/api-keys/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deactivate_api_key(api_key_id: str, session: SessionDep, current_user: CurrentUser) -> None:
+async def deactivate_api_key(
+    api_key_id: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+    _rl: Annotated[None, _apikey_delete_rl] = None,
+) -> None:
     api_key = await session.scalar(select(APIKey).where(APIKey.id == api_key_id, APIKey.user_id == current_user.id))
     if api_key is None:
         raise AppError("api_key_not_found", "API key does not exist", status_code=404)
@@ -92,7 +107,11 @@ async def deactivate_api_key(api_key_id: str, session: SessionDep, current_user:
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(session: SessionDep, current_user: CurrentUser) -> MeResponse:
+async def me(
+    session: SessionDep,
+    current_user: CurrentUser,
+    _rl: Annotated[None, _me_rl] = None,
+) -> MeResponse:
     api_keys = list(
         (
             await session.scalars(

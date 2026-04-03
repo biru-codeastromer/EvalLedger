@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.database import engine
 from app.errors import register_exception_handlers
 from app.logging import configure_logging, logger
+from app.ratelimit import set_limiter
 from app.routers import admin, auth, benchmarks, contamination, oauth, search, stats, versions
 from app.services.storage import StorageService
 
@@ -26,7 +27,23 @@ settings = get_settings()
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     await StorageService.from_settings(settings).ensure_ready()
-    yield
+    # Attach a shared Redis client to the rate-limiter module.  Failures here
+    # are non-fatal: set_limiter(None) keeps the limiter in fail-open mode.
+    redis_client: Redis | None = None
+    try:
+        redis_client = Redis.from_url(settings.redis_url, encoding="utf-8", decode_responses=False)
+        await redis_client.ping()
+        set_limiter(redis_client)
+        logger.info("ratelimit.redis_connected")
+    except Exception:
+        logger.warning("ratelimit.redis_unavailable — rate limiting disabled", exc_info=True)
+        set_limiter(None)
+    try:
+        yield
+    finally:
+        set_limiter(None)
+        if redis_client is not None:
+            await redis_client.aclose()
 
 
 app = FastAPI(

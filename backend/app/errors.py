@@ -60,12 +60,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         request_id = getattr(request.state, "request_id", None)
         if request_id is not None:
             details.setdefault("request_id", request_id)
-        return error_response(
+        response = error_response(
             exc.code,
             exc.message,
             status_code=exc.status_code,
             details=details or None,
         )
+        if exc.status_code == 429:
+            retry_after = (exc.details or {}).get("retry_after")
+            if retry_after is not None:
+                response.headers["Retry-After"] = str(retry_after)
+        return response
 
     @app.exception_handler(HTTPException)
     async def handle_http_error(request: Request, exc: HTTPException) -> JSONResponse:

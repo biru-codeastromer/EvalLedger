@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -10,13 +10,16 @@ from app.dependencies import SessionDep
 from app.models.benchmark import Benchmark
 from app.models.contamination import ContaminationReport
 from app.models.version import BenchmarkVersion
+from app.ratelimit import RateLimit
 
 router = APIRouter()
 StatsLimit = Annotated[int, Query(ge=1, le=50)]
 
+_stats_rl = Depends(RateLimit("stats", anon_limit=30, auth_limit=60))
+
 
 @router.get("/overview")
-async def overview(session: SessionDep) -> dict[str, int]:
+async def overview(session: SessionDep, _rl: Annotated[None, _stats_rl] = None) -> dict[str, int]:
     total_benchmarks = await session.scalar(select(func.count(Benchmark.id)))
     total_versions = await session.scalar(select(func.count(BenchmarkVersion.id)))
     total_checks = await session.scalar(select(func.count(ContaminationReport.id)))
@@ -34,7 +37,11 @@ async def overview(session: SessionDep) -> dict[str, int]:
 
 
 @router.get("/recent")
-async def recent(session: SessionDep, limit: StatsLimit = 10) -> list[dict[str, object]]:
+async def recent(
+    session: SessionDep,
+    _rl: Annotated[None, _stats_rl] = None,
+    limit: StatsLimit = 10,
+) -> list[dict[str, object]]:
     versions = list(
         (
             await session.scalars(
@@ -59,7 +66,11 @@ async def recent(session: SessionDep, limit: StatsLimit = 10) -> list[dict[str, 
 
 
 @router.get("/leaderboard")
-async def leaderboard(session: SessionDep, limit: StatsLimit = 10) -> list[dict[str, object]]:
+async def leaderboard(
+    session: SessionDep,
+    _rl: Annotated[None, _stats_rl] = None,
+    limit: StatsLimit = 10,
+) -> list[dict[str, object]]:
     benchmarks = list(
         (
             await session.scalars(

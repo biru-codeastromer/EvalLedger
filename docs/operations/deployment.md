@@ -134,6 +134,7 @@ Then redeploy the frontend from the Vercel Deployments tab.
 | `GITHUB_CLIENT_SECRET` | manual | GitHub OAuth App client secret |
 | `GOOGLE_CLIENT_ID` | manual | Google OAuth client ID |
 | `GOOGLE_CLIENT_SECRET` | manual | Google OAuth client secret |
+| `RATE_LIMIT_ENABLED` | static | `true` — set to `false` only in test/staging environments |
 
 ### Vercel
 
@@ -141,6 +142,59 @@ Then redeploy the frontend from the Vercel Deployments tab.
 |---|---|
 | `NEXT_PUBLIC_API_URL` | `https://evalledger-api.onrender.com` |
 | `API_INTERNAL_URL` | `https://evalledger-api.onrender.com` |
+
+---
+
+## Rate limiting
+
+EvalLedger enforces a **Redis-backed fixed-window rate limiter** on all public and write endpoints.
+
+### How it works
+
+- **Client identity** (most to least specific): hashed API key → hashed Bearer token → `X-Forwarded-For` first hop → direct IP.  Raw tokens are SHA-256 hashed before appearing in Redis keys.
+- **Window**: 60 seconds (fixed, non-sliding).
+- **Fail-open**: if Redis is unavailable, all requests are allowed and a `WARNING` is logged.  The API continues serving normally during Redis restarts.
+- **Disabled globally** with `RATE_LIMIT_ENABLED=false` (useful in integration-test environments).
+
+### Limits per bucket
+
+| Bucket | Route(s) | Anon | Auth |
+|---|---|---|---|
+| `search` | `GET /search` | 60/min | 120/min |
+| `stats` | `GET /stats/*` | 30/min | 60/min |
+| `auth_me` | `GET /auth/me` | 30/min | 30/min |
+| `auth_apikey_create` | `POST /auth/api-keys` | 10/min | 10/min |
+| `auth_apikey_delete` | `DELETE /auth/api-keys/{id}` | 10/min | 10/min |
+| `benchmark_create` | `POST /benchmarks` | 20/min | 20/min |
+| `version_create` | `POST /benchmarks/{slug}/versions` | 10/min | 10/min |
+| `contamination_check` | `POST /contamination/check` | 10/min | 20/min |
+| `oauth_start_github` | `GET /auth/oauth/github` | 20/min | 20/min |
+| `oauth_start_google` | `GET /auth/oauth/google` | 20/min | 20/min |
+
+### Over-limit response
+
+JSON endpoints respond with **HTTP 429** and a structured error body:
+
+```json
+{
+  "error": {
+    "code": "rate_limit_exceeded",
+    "message": "Too many requests — please slow down and retry shortly.",
+    "details": { "retry_after": 42 }
+  }
+}
+```
+
+The response also includes a standard **`Retry-After: <seconds>`** header.
+
+OAuth start endpoints (browser redirect flow) respond with a **302 redirect** to `/login?error=Too+many+sign-in+attempts...` instead.
+
+### Env vars
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RATE_LIMIT_ENABLED` | `true` | Set to `false` to disable globally |
+| `REDIS_URL` | (Render managed) | Used for both Celery broker and rate limit counters |
 
 ---
 

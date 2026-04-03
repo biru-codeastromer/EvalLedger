@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Annotated
 
 from celery.result import AsyncResult
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.dependencies import OptionalUser, SessionDep
 from app.errors import AppError
 from app.models.contamination import ReferenceCorpus
+from app.ratelimit import RateLimit
 from app.schemas.contamination import (
     ContaminationCheckResponse,
     ContaminationJobStatus,
@@ -25,6 +26,8 @@ from app.utils.uploads import validate_upload_file
 router = APIRouter()
 settings = get_settings()
 storage_service = StorageService.from_settings(settings)
+
+_check_rl = Depends(RateLimit("contamination_check", anon_limit=10, auth_limit=20))
 
 
 def _parse_corpus_ids(raw_value: str | None) -> list[str]:
@@ -57,6 +60,7 @@ async def list_corpora(session: SessionDep) -> list[CorpusResponse]:
 async def run_check(
     session: SessionDep,
     artifact: Annotated[UploadFile, File()],
+    _rl: Annotated[None, _check_rl] = None,
     corpus_ids: Annotated[str | None, Form()] = None,
     current_user: OptionalUser = None,
 ) -> ContaminationCheckResponse:

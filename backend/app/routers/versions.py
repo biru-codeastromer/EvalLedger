@@ -6,7 +6,7 @@ from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -18,6 +18,7 @@ from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
 from app.models.contamination import ContaminationReport, ReferenceCorpus
 from app.models.version import BenchmarkVersion
+from app.ratelimit import RateLimit
 from app.schemas.audit import AuditEventResponse
 from app.schemas.contamination import ContaminationReportItem
 from app.schemas.version import (
@@ -37,6 +38,8 @@ settings = get_settings()
 storage_service = StorageService.from_settings(settings)
 versioning_service = VersioningService()
 CitationFormatQuery = Annotated[str | None, Query()]
+
+_version_create_rl = Depends(RateLimit("version_create", anon_limit=10, auth_limit=10))
 
 
 def _parse_json_field(raw_value: str | None) -> dict[str, Any] | None:
@@ -107,6 +110,7 @@ async def create_version(
     artifact: Annotated[UploadFile, File()],
     version: Annotated[str, Form()],
     current_user: CurrentUser,
+    _rl: Annotated[None, _version_create_rl] = None,
     num_examples: Annotated[int | None, Form()] = None,
     splits: Annotated[str | None, Form()] = None,
     language: Annotated[str | None, Form()] = None,
