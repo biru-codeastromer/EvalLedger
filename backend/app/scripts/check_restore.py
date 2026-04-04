@@ -38,7 +38,6 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -274,7 +273,7 @@ def main() -> int:
     args = parser.parse_args()
 
     base_url = args.api_url.rstrip("/")
-    print(f"\nEvalLedger post-restore verification")
+    print("\nEvalLedger post-restore verification")
     print(f"Target: {base_url}")
     if args.api_key:
         print("Admin checks: enabled")
