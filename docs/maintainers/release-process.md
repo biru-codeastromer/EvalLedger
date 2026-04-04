@@ -8,7 +8,8 @@ This is the maintainer checklist for cutting a stable EvalLedger release.
 2. Run `make lint`, `make test`, and `cd frontend && pnpm build`.
 3. Apply pending migrations in staging.
 4. Seed or refresh any staging data required for verification.
-5. Review open schema, auth, or storage changes for rollout order.
+5. Run `make loadtest API_URL=http://localhost:8000` or the staging equivalent and compare to the last known-good baseline.
+6. Review open schema, auth, storage, or performance-sensitive changes for rollout order.
 
 ## Release checklist
 
@@ -27,6 +28,7 @@ This is the maintainer checklist for cutting a stable EvalLedger release.
 - open one benchmark detail page
 - create an API key from `/account`
 - submit flow reaches the review step without client errors
+- run one small browse-scenario perf check if the release touched query-heavy paths
 
 ## After release
 

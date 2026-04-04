@@ -10,7 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.config import get_settings
 from app.dependencies import CurrentUser, SessionDep
@@ -18,6 +18,7 @@ from app.errors import AppError
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
 from app.models.contamination import ContaminationReport, ReferenceCorpus
+from app.models.user import User
 from app.models.version import BenchmarkVersion
 from app.ratelimit import RateLimit
 from app.schemas.audit import AuditEventResponse
@@ -89,11 +90,7 @@ def _build_version_detail(benchmark: Benchmark, version: BenchmarkVersion) -> Ve
 
 
 async def _fetch_benchmark(session: SessionDep, slug: str) -> Benchmark:
-    benchmark = await session.scalar(
-        select(Benchmark)
-        .options(selectinload(Benchmark.versions), selectinload(Benchmark.submitter))
-        .where(Benchmark.slug == slug)
-    )
+    benchmark = await session.scalar(select(Benchmark).where(Benchmark.slug == slug))
     if benchmark is None:
         raise AppError("benchmark_not_found", "Benchmark not found", status_code=404)
     return benchmark
@@ -102,7 +99,16 @@ async def _fetch_benchmark(session: SessionDep, slug: str) -> Benchmark:
 @router.get("/{slug}/versions", response_model=list[VersionListItem])
 async def list_versions(slug: str, session: SessionDep) -> list[VersionListItem]:
     benchmark = await _fetch_benchmark(session, slug)
-    return [VersionListItem.model_validate(version) for version in benchmark.versions]
+    versions = list(
+        (
+            await session.scalars(
+                select(BenchmarkVersion)
+                .where(BenchmarkVersion.benchmark_id == benchmark.id)
+                .order_by(BenchmarkVersion.created_at.desc())
+            )
+        ).all()
+    )
+    return [VersionListItem.model_validate(version) for version in versions]
 
 
 @router.post("/{slug}/versions", response_model=VersionCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -258,7 +264,6 @@ async def get_contamination_reports(slug: str, version: str, session: SessionDep
     benchmark = await _fetch_benchmark(session, slug)
     version_record = await session.scalar(
         select(BenchmarkVersion)
-        .options(selectinload(BenchmarkVersion.contamination_reports))
         .where(BenchmarkVersion.benchmark_id == benchmark.id, BenchmarkVersion.version == version)
     )
     if version_record is None:
@@ -319,17 +324,15 @@ async def get_citation(
 
 @router.get("/{slug}/{version}", response_model=VersionDetail)
 async def get_version_detail(slug: str, version: str, session: SessionDep) -> VersionDetail:
-    benchmark = await session.scalar(
-        select(Benchmark)
-        .options(
-            selectinload(Benchmark.submitter),
-            selectinload(Benchmark.versions).selectinload(BenchmarkVersion.submitter),
+    benchmark = await _fetch_benchmark(session, slug)
+    version_record = await session.scalar(
+        select(BenchmarkVersion)
+        .options(selectinload(BenchmarkVersion.submitter))
+        .where(
+            BenchmarkVersion.benchmark_id == benchmark.id,
+            BenchmarkVersion.version == version,
         )
-        .where(Benchmark.slug == slug)
     )
-    if benchmark is None:
-        raise AppError("benchmark_not_found", "Benchmark not found", status_code=404)
-    version_record = next((item for item in benchmark.versions if item.version == version), None)
     if version_record is None:
         raise AppError("version_not_found", "Version not found", status_code=404)
     return _build_version_detail(benchmark, version_record)
@@ -357,7 +360,22 @@ async def get_version_activity(
         (
             await session.scalars(
                 select(AuditEvent)
-                .options(selectinload(AuditEvent.actor))
+                .options(
+                    load_only(
+                        AuditEvent.id,
+                        AuditEvent.action,
+                        AuditEvent.resource_type,
+                        AuditEvent.resource_id,
+                        AuditEvent.resource_slug,
+                        AuditEvent.summary,
+                        AuditEvent.metadata_json,
+                        AuditEvent.created_at,
+                        AuditEvent.actor_user_id,
+                    ),
+                    selectinload(AuditEvent.actor).load_only(
+                        User.id, User.username, User.display_name, User.affiliation, User.is_verified
+                    ),
+                )
                 .where(AuditEvent.version_id == version_record.id)
                 .order_by(AuditEvent.created_at.desc())
                 .limit(limit)

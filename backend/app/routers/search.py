@@ -4,12 +4,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import selectinload
 
 from app.dependencies import SessionDep
 from app.models.benchmark import Benchmark
 from app.ratelimit import RateLimit
 from app.schemas.benchmark import BenchmarkListItem, BenchmarkListResponse
+from app.services.query_projections import latest_version_projection
 
 router = APIRouter()
 
@@ -22,27 +22,6 @@ PageSize = Annotated[int, Query(ge=1, le=100)]
 
 _search_rl = Depends(RateLimit("search", anon_limit=60, auth_limit=120))
 
-
-def _build_item(benchmark: Benchmark) -> BenchmarkListItem:
-    latest_version = benchmark.versions[0] if benchmark.versions else None
-    return BenchmarkListItem(
-        id=benchmark.id,
-        slug=benchmark.slug,
-        name=benchmark.name,
-        description=benchmark.description,
-        domain=benchmark.domain,
-        task_type=benchmark.task_type,
-        is_verified=benchmark.is_verified,
-        total_versions=benchmark.total_versions,
-        total_citations=benchmark.total_citations,
-        created_at=benchmark.created_at,
-        updated_at=benchmark.updated_at,
-        latest_version=latest_version.version if latest_version else None,
-        latest_contamination_status=latest_version.contamination_status if latest_version else None,
-        latest_num_examples=latest_version.num_examples if latest_version else None,
-    )
-
-
 @router.get("/search", response_model=BenchmarkListResponse)
 async def search_benchmarks(
     session: SessionDep,
@@ -54,31 +33,52 @@ async def search_benchmarks(
     page: PageNumber = 1,
     limit: PageSize = 20,
 ) -> BenchmarkListResponse:
-    statement = select(Benchmark).options(selectinload(Benchmark.versions))
+    latest = latest_version_projection()
+    base_statement = select(Benchmark.id).select_from(Benchmark)
+    statement = select(
+        Benchmark.id,
+        Benchmark.slug,
+        Benchmark.name,
+        Benchmark.description,
+        Benchmark.domain,
+        Benchmark.task_type,
+        Benchmark.is_verified,
+        Benchmark.total_versions,
+        Benchmark.total_citations,
+        Benchmark.created_at,
+        Benchmark.updated_at,
+        latest.version,
+        latest.contamination_status,
+        latest.num_examples,
+    ).select_from(Benchmark)
     if q:
-        statement = statement.where(
-            or_(
-                Benchmark.search_vector.op("@@")(func.websearch_to_tsquery("english", q)),
-                Benchmark.name.ilike(f"%{q}%"),
-                Benchmark.description.ilike(f"%{q}%"),
-            )
+        predicate = or_(
+            Benchmark.search_vector.op("@@")(func.websearch_to_tsquery("english", q)),
+            Benchmark.name.ilike(f"%{q}%"),
+            Benchmark.description.ilike(f"%{q}%"),
         )
+        statement = statement.where(predicate)
+        base_statement = base_statement.where(predicate)
     if domain:
         statement = statement.where(Benchmark.domain.op("&&")(domain))
+        base_statement = base_statement.where(Benchmark.domain.op("&&")(domain))
     if task_type:
         statement = statement.where(Benchmark.task_type == task_type)
-    benchmarks = list((await session.scalars(statement.order_by(Benchmark.name))).all())
+        base_statement = base_statement.where(Benchmark.task_type == task_type)
     if contamination_status:
-        benchmarks = [
-            benchmark
-            for benchmark in benchmarks
-            if benchmark.versions and benchmark.versions[0].contamination_status == contamination_status
-        ]
-    total = len(benchmarks)
-    sliced = benchmarks[(page - 1) * limit : page * limit]
+        statement = statement.where(latest.contamination_status == contamination_status)
+        base_statement = base_statement.where(latest.contamination_status == contamination_status)
+    total = (await session.scalar(select(func.count()).select_from(base_statement.subquery()))) or 0
+    rows = (
+        await session.execute(
+            statement.order_by(Benchmark.name, Benchmark.slug)
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+    ).all()
     return BenchmarkListResponse(
         page=page,
         limit=limit,
         total=total,
-        items=[_build_item(item) for item in sliced],
+        items=[BenchmarkListItem(**dict(row._mapping)) for row in rows],
     )

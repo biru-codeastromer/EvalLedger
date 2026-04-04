@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
 from sqlalchemy import Select, func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.dependencies import AdminUser, SessionDep
 from app.errors import AppError
@@ -26,6 +26,7 @@ from app.schemas.admin import (
 from app.schemas.audit import AuditEventResponse
 from app.schemas.benchmark import BenchmarkListItem
 from app.services.audit import record_audit_event
+from app.services.query_projections import latest_version_projection
 
 router = APIRouter()
 AdminLimit = Annotated[int, Query(ge=1, le=100)]
@@ -37,9 +38,17 @@ _admin_logger = logging.getLogger("evalledger.admin")
 # ---------------------------------------------------------------------------
 
 
-def _review_queue_item(benchmark: Benchmark) -> ReviewQueueItem:
+def _review_queue_item(
+    benchmark: Benchmark,
+    *,
+    latest_version: str | None = None,
+    latest_contamination_status: str | None = None,
+    latest_num_examples: int | None = None,
+    latest_artifact_sha256: str | None = None,
+    latest_artifact_size_bytes: int | None = None,
+) -> ReviewQueueItem:
     """Build a ReviewQueueItem from a fully-loaded Benchmark ORM object."""
-    latest_version = benchmark.versions[0] if benchmark.versions else None
+    latest = benchmark.versions[0] if benchmark.versions else None
 
     # Collect OAuth providers the submitter has authenticated with.
     submitter_providers: list[str] = []
@@ -58,9 +67,13 @@ def _review_queue_item(benchmark: Benchmark) -> ReviewQueueItem:
         total_citations=benchmark.total_citations,
         created_at=benchmark.created_at,
         updated_at=benchmark.updated_at,
-        latest_version=latest_version.version if latest_version else None,
-        latest_contamination_status=latest_version.contamination_status if latest_version else None,
-        latest_num_examples=latest_version.num_examples if latest_version else None,
+        latest_version=latest_version if latest_version is not None else (latest.version if latest else None),
+        latest_contamination_status=latest_contamination_status
+        if latest_contamination_status is not None
+        else (latest.contamination_status if latest else None),
+        latest_num_examples=latest_num_examples
+        if latest_num_examples is not None
+        else (latest.num_examples if latest else None),
     )
     return ReviewQueueItem(
         **base.model_dump(),
@@ -69,8 +82,12 @@ def _review_queue_item(benchmark: Benchmark) -> ReviewQueueItem:
         reviewed_at=benchmark.reviewed_at,
         reviewed_by=benchmark.reviewed_by,
         submitter_providers=submitter_providers,
-        latest_artifact_sha256=latest_version.artifact_sha256 if latest_version else None,
-        latest_artifact_size_bytes=latest_version.artifact_size_bytes if latest_version else None,
+        latest_artifact_sha256=latest_artifact_sha256
+        if latest_artifact_sha256 is not None
+        else (latest.artifact_sha256 if latest else None),
+        latest_artifact_size_bytes=latest_artifact_size_bytes
+        if latest_artifact_size_bytes is not None
+        else (latest.artifact_size_bytes if latest else None),
     )
 
 
@@ -102,12 +119,40 @@ def _base_benchmark_query(status: str, contamination: str | None) -> Select[tupl
     contamination: optional filter on any version's contamination_status,
       e.g. "flagged", "contaminated", "pending".
     """
+    latest = latest_version_projection()
     query = (
-        select(Benchmark)
+        select(
+            Benchmark,
+            latest.version,
+            latest.contamination_status,
+            latest.num_examples,
+            latest.artifact_sha256,
+            latest.artifact_size_bytes,
+        )
         .options(
-            selectinload(Benchmark.submitter).selectinload(User.identities),
-            selectinload(Benchmark.reviewed_by),
-            selectinload(Benchmark.versions),
+            load_only(
+                Benchmark.id,
+                Benchmark.slug,
+                Benchmark.name,
+                Benchmark.description,
+                Benchmark.domain,
+                Benchmark.task_type,
+                Benchmark.is_verified,
+                Benchmark.total_versions,
+                Benchmark.total_citations,
+                Benchmark.created_at,
+                Benchmark.updated_at,
+                Benchmark.review_note,
+                Benchmark.reviewed_at,
+                Benchmark.reviewed_by_id,
+                Benchmark.submitter_id,
+            ),
+            selectinload(Benchmark.submitter)
+            .load_only(User.id, User.username, User.display_name, User.affiliation, User.is_verified)
+            .selectinload(User.identities),
+            selectinload(Benchmark.reviewed_by).load_only(
+                User.id, User.username, User.display_name, User.affiliation, User.is_verified
+            ),
         )
         .order_by(Benchmark.created_at.asc())  # oldest first — fair review queue
     )
@@ -195,8 +240,18 @@ async def review_queue(
     limit         1-100 (default: 50)
     """
     query = _base_benchmark_query(status=status, contamination=contamination).limit(limit)
-    benchmarks = list((await session.scalars(query)).all())
-    return [_review_queue_item(b) for b in benchmarks]
+    rows = (await session.execute(query)).all()
+    return [
+        _review_queue_item(
+            row[0],
+            latest_version=row.latest_version,
+            latest_contamination_status=row.latest_contamination_status,
+            latest_num_examples=row.latest_num_examples,
+            latest_artifact_sha256=row.latest_artifact_sha256,
+            latest_artifact_size_bytes=row.latest_artifact_size_bytes,
+        )
+        for row in rows
+    ]
 
 
 @router.get("/benchmarks/{slug}/context", response_model=BenchmarkReviewContext)
@@ -211,10 +266,60 @@ async def benchmark_review_context(slug: str, session: SessionDep, _: AdminUser)
     benchmark = await session.scalar(
         select(Benchmark)
         .options(
-            selectinload(Benchmark.submitter).selectinload(User.identities),
-            selectinload(Benchmark.reviewed_by),
-            selectinload(Benchmark.versions).selectinload(BenchmarkVersion.submitter),
-            selectinload(Benchmark.audit_events).selectinload(AuditEvent.actor),
+            load_only(
+                Benchmark.id,
+                Benchmark.slug,
+                Benchmark.name,
+                Benchmark.description,
+                Benchmark.domain,
+                Benchmark.task_type,
+                Benchmark.is_verified,
+                Benchmark.total_versions,
+                Benchmark.total_citations,
+                Benchmark.created_at,
+                Benchmark.updated_at,
+                Benchmark.review_note,
+                Benchmark.reviewed_at,
+                Benchmark.reviewed_by_id,
+                Benchmark.submitter_id,
+            ),
+            selectinload(Benchmark.submitter)
+            .load_only(User.id, User.username, User.display_name, User.affiliation, User.is_verified)
+            .selectinload(User.identities),
+            selectinload(Benchmark.reviewed_by).load_only(
+                User.id, User.username, User.display_name, User.affiliation, User.is_verified
+            ),
+            selectinload(Benchmark.versions)
+            .load_only(
+                BenchmarkVersion.id,
+                BenchmarkVersion.version,
+                BenchmarkVersion.contamination_status,
+                BenchmarkVersion.artifact_sha256,
+                BenchmarkVersion.artifact_size_bytes,
+                BenchmarkVersion.num_examples,
+                BenchmarkVersion.license,
+                BenchmarkVersion.paper_url,
+                BenchmarkVersion.github_url,
+                BenchmarkVersion.created_at,
+                BenchmarkVersion.released_at,
+                BenchmarkVersion.submitter_id,
+            )
+            .selectinload(BenchmarkVersion.submitter)
+            .load_only(User.id, User.username, User.display_name, User.affiliation, User.is_verified),
+            selectinload(Benchmark.audit_events)
+            .load_only(
+                AuditEvent.id,
+                AuditEvent.action,
+                AuditEvent.resource_type,
+                AuditEvent.resource_id,
+                AuditEvent.resource_slug,
+                AuditEvent.summary,
+                AuditEvent.metadata_json,
+                AuditEvent.created_at,
+                AuditEvent.actor_user_id,
+            )
+            .selectinload(AuditEvent.actor)
+            .load_only(User.id, User.username, User.display_name, User.affiliation, User.is_verified),
         )
         .where(Benchmark.slug == slug)
     )
@@ -247,7 +352,22 @@ async def recent_audit_events(
     """Recent admin audit events, optionally filtered by action or resource type."""
     query = (
         select(AuditEvent)
-        .options(selectinload(AuditEvent.actor))
+        .options(
+            load_only(
+                AuditEvent.id,
+                AuditEvent.action,
+                AuditEvent.resource_type,
+                AuditEvent.resource_id,
+                AuditEvent.resource_slug,
+                AuditEvent.summary,
+                AuditEvent.metadata_json,
+                AuditEvent.created_at,
+                AuditEvent.actor_user_id,
+            ),
+            selectinload(AuditEvent.actor).load_only(
+                User.id, User.username, User.display_name, User.affiliation, User.is_verified
+            ),
+        )
         .order_by(AuditEvent.created_at.desc())
         .limit(limit)
     )

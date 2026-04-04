@@ -91,13 +91,31 @@ class ScalarList:
         return self._items
 
 
+class ExecuteRow:
+    def __init__(self, benchmark, **fields):
+        self._benchmark = benchmark
+        self.latest_version = None
+        self.latest_contamination_status = None
+        self.latest_num_examples = None
+        self.latest_artifact_sha256 = None
+        self.latest_artifact_size_bytes = None
+        for key, value in fields.items():
+            setattr(self, key, value)
+
+    def __getitem__(self, index: int):
+        if index == 0:
+            return self._benchmark
+        raise IndexError(index)
+
+
 class FakeSession:
     """Minimal async session stub for unit-testing router functions."""
 
-    def __init__(self, scalar_values=None, scalars_values=None):
+    def __init__(self, scalar_values=None, scalars_values=None, execute_values=None):
         # scalar_values is an iterable that scalar() pops from in order.
         self._scalar_iter = iter(scalar_values if scalar_values is not None else [])
         self._scalars_value = scalars_values or []
+        self._execute_values = execute_values
         self.added: list = []
 
     async def scalar(self, _stmt):
@@ -105,6 +123,11 @@ class FakeSession:
 
     async def scalars(self, _stmt):
         return ScalarList(self._scalars_value)
+
+    async def execute(self, _stmt):
+        if self._execute_values is not None:
+            return ScalarList(self._execute_values)
+        return ScalarList([ExecuteRow(item) for item in self._scalars_value])
 
     def add(self, item):
         self.added.append(item)

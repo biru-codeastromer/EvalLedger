@@ -5,12 +5,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.dependencies import CurrentUser, SessionDep
 from app.errors import AppError
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
+from app.models.user import User
 from app.ratelimit import RateLimit
 from app.schemas.audit import AuditEventResponse
 from app.schemas.benchmark import (
@@ -21,6 +22,7 @@ from app.schemas.benchmark import (
     BenchmarkUpdate,
 )
 from app.services.audit import record_audit_event
+from app.services.query_projections import latest_version_projection
 
 router = APIRouter()
 
@@ -28,8 +30,13 @@ _benchmark_logger = logging.getLogger("evalledger.benchmarks")
 _benchmark_create_rl = Depends(RateLimit("benchmark_create", anon_limit=20, auth_limit=20))
 
 
-def _benchmark_item(benchmark: Benchmark) -> BenchmarkListItem:
-    latest_version = benchmark.versions[0] if benchmark.versions else None
+def _benchmark_item(
+    benchmark: Benchmark,
+    *,
+    latest_version: str | None = None,
+    latest_contamination_status: str | None = None,
+    latest_num_examples: int | None = None,
+) -> BenchmarkListItem:
     return BenchmarkListItem(
         id=benchmark.id,
         slug=benchmark.slug,
@@ -42,9 +49,9 @@ def _benchmark_item(benchmark: Benchmark) -> BenchmarkListItem:
         total_citations=benchmark.total_citations,
         created_at=benchmark.created_at,
         updated_at=benchmark.updated_at,
-        latest_version=latest_version.version if latest_version else None,
-        latest_contamination_status=latest_version.contamination_status if latest_version else None,
-        latest_num_examples=latest_version.num_examples if latest_version else None,
+        latest_version=latest_version,
+        latest_contamination_status=latest_contamination_status,
+        latest_num_examples=latest_num_examples,
     )
 
 
@@ -54,36 +61,61 @@ async def list_benchmarks(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> BenchmarkListResponse:
+    latest = latest_version_projection()
     total = await session.scalar(select(func.count(Benchmark.id)))
-    benchmarks = list(
-        (
-            await session.scalars(
-                select(Benchmark)
-                .options(selectinload(Benchmark.versions))
-                .order_by(Benchmark.created_at.desc())
-                .offset((page - 1) * limit)
-                .limit(limit)
+    rows = (
+        await session.execute(
+            select(
+                Benchmark,
+                latest.version,
+                latest.contamination_status,
+                latest.num_examples,
             )
-        ).all()
-    )
+            .order_by(Benchmark.created_at.desc(), Benchmark.slug)
+            .offset((page - 1) * limit)
+            .limit(limit)
+        )
+    ).all()
     return BenchmarkListResponse(
         page=page,
         limit=limit,
         total=total or 0,
-        items=[_benchmark_item(benchmark) for benchmark in benchmarks],
+        items=[
+            _benchmark_item(
+                row[0],
+                latest_version=row.latest_version,
+                latest_contamination_status=row.latest_contamination_status,
+                latest_num_examples=row.latest_num_examples,
+            )
+            for row in rows
+        ],
     )
 
 
 @router.get("/{slug}", response_model=BenchmarkDetail)
 async def get_benchmark(slug: str, session: SessionDep) -> BenchmarkDetail:
-    benchmark = await session.scalar(
-        select(Benchmark)
-        .options(selectinload(Benchmark.versions), selectinload(Benchmark.submitter))
-        .where(Benchmark.slug == slug)
-    )
-    if benchmark is None:
+    latest = latest_version_projection()
+    row = (
+        await session.execute(
+            select(
+                Benchmark,
+                latest.version,
+                latest.contamination_status,
+                latest.num_examples,
+            )
+            .options(selectinload(Benchmark.submitter))
+            .where(Benchmark.slug == slug)
+        )
+    ).first()
+    if row is None:
         raise AppError("benchmark_not_found", "Benchmark not found", status_code=404)
-    item = _benchmark_item(benchmark)
+    benchmark = row[0]
+    item = _benchmark_item(
+        benchmark,
+        latest_version=row.latest_version,
+        latest_contamination_status=row.latest_contamination_status,
+        latest_num_examples=row.latest_num_examples,
+    )
     return BenchmarkDetail(**item.model_dump(), submitter=benchmark.submitter)
 
 
@@ -121,7 +153,7 @@ async def create_benchmark(
     await session.commit()
     created = await session.scalar(
         select(Benchmark)
-        .options(selectinload(Benchmark.versions), selectinload(Benchmark.submitter))
+        .options(selectinload(Benchmark.submitter))
         .where(Benchmark.id == benchmark.id)
     )
     assert created is not None
@@ -142,7 +174,7 @@ async def update_benchmark(
 ) -> BenchmarkDetail:
     benchmark = await session.scalar(
         select(Benchmark)
-        .options(selectinload(Benchmark.versions), selectinload(Benchmark.submitter))
+        .options(selectinload(Benchmark.submitter))
         .where(Benchmark.slug == slug)
     )
     if benchmark is None:
@@ -164,9 +196,28 @@ async def update_benchmark(
         summary=f"Updated benchmark {benchmark.slug}",
     )
     await session.commit()
-    await session.refresh(benchmark)
-    item = _benchmark_item(benchmark)
-    return BenchmarkDetail(**item.model_dump(), submitter=benchmark.submitter)
+    latest = latest_version_projection()
+    row = (
+        await session.execute(
+            select(
+                Benchmark,
+                latest.version,
+                latest.contamination_status,
+                latest.num_examples,
+            )
+            .options(selectinload(Benchmark.submitter))
+            .where(Benchmark.id == benchmark.id)
+        )
+    ).first()
+    assert row is not None
+    refreshed = row[0]
+    item = _benchmark_item(
+        refreshed,
+        latest_version=row.latest_version,
+        latest_contamination_status=row.latest_contamination_status,
+        latest_num_examples=row.latest_num_examples,
+    )
+    return BenchmarkDetail(**item.model_dump(), submitter=refreshed.submitter)
 
 
 @router.get("/{slug}/activity", response_model=list[AuditEventResponse])
@@ -182,7 +233,22 @@ async def get_benchmark_activity(
         (
             await session.scalars(
                 select(AuditEvent)
-                .options(selectinload(AuditEvent.actor))
+                .options(
+                    load_only(
+                        AuditEvent.id,
+                        AuditEvent.action,
+                        AuditEvent.resource_type,
+                        AuditEvent.resource_id,
+                        AuditEvent.resource_slug,
+                        AuditEvent.summary,
+                        AuditEvent.metadata_json,
+                        AuditEvent.created_at,
+                        AuditEvent.actor_user_id,
+                    ),
+                    selectinload(AuditEvent.actor).load_only(
+                        User.id, User.username, User.display_name, User.affiliation, User.is_verified
+                    ),
+                )
                 .where(AuditEvent.benchmark_id == benchmark.id)
                 .order_by(AuditEvent.created_at.desc())
                 .limit(limit)

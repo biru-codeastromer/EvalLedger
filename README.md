@@ -83,18 +83,19 @@ Use `make dev` for local development, `make migrate` after schema changes, `make
 
 ## Operations
 
-Operational runbooks live in `docs/operations/` and maintainer process notes live in `docs/maintainers/`. They cover incident response, backup and restore drills, release flow, and migration discipline.
+Operational runbooks live in `docs/operations/` and maintainer process notes live in `docs/maintainers/`. They cover incident response, backup and restore drills, release flow, migration discipline, and performance verification.
 
 ## Load testing
 
-Use the local harness below to get a first-pass latency and throughput read on the API:
+Use the built-in scenarios below to get a first-pass latency and throughput read on the API:
 
 ```bash
-cd backend
-uv run python -m app.scripts.loadtest --url http://localhost:8000/health/live --requests 200 --concurrency 20
+make loadtest API_URL=http://localhost:8000
+make loadtest-account API_URL=http://localhost:8000 API_KEY=<user-api-key>
+make loadtest-review API_URL=http://localhost:8000 API_KEY=<admin-api-key>
 ```
 
-The harness reports success rate, throughput, and p50/p95/p99 latency. It is intended for controlled local or staging checks rather than internet-scale benchmarking.
+The harness reports success rate, throughput, p50/p95/p99 latency, and per-endpoint summaries for browse, account, and review flows. It is intended for controlled local or staging checks rather than internet-scale benchmarking. See `docs/operations/performance.md` for the full workflow and guidance on separating Render cold-start effects from real query regressions.
 
 ## Product policies
 

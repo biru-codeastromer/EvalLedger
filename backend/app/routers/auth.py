@@ -13,13 +13,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from app.dependencies import CurrentUser, SessionDep
 from app.errors import AppError
 from app.models.api_key import APIKey
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
+from app.models.user import User
 from app.ratelimit import RateLimit
 from app.schemas.audit import AuditEventResponse
 from app.schemas.auth import (
@@ -126,7 +127,18 @@ async def me(
     api_keys = list(
         (
             await session.scalars(
-                select(APIKey).where(APIKey.user_id == current_user.id).order_by(APIKey.created_at.desc())
+                select(APIKey)
+                .options(
+                    load_only(
+                        APIKey.id,
+                        APIKey.name,
+                        APIKey.last_used_at,
+                        APIKey.created_at,
+                        APIKey.is_active,
+                    )
+                )
+                .where(APIKey.user_id == current_user.id)
+                .order_by(APIKey.created_at.desc())
             )
         ).all()
     )
@@ -134,6 +146,16 @@ async def me(
         (
             await session.scalars(
                 select(Benchmark)
+                .options(
+                    load_only(
+                        Benchmark.id,
+                        Benchmark.slug,
+                        Benchmark.name,
+                        Benchmark.total_versions,
+                        Benchmark.is_verified,
+                        Benchmark.updated_at,
+                    )
+                )
                 .where(Benchmark.submitter_id == current_user.id)
                 .order_by(Benchmark.updated_at.desc(), Benchmark.created_at.desc())
             )
@@ -143,7 +165,26 @@ async def me(
         (
             await session.scalars(
                 select(AuditEvent)
-                .options(selectinload(AuditEvent.actor))
+                .options(
+                    load_only(
+                        AuditEvent.id,
+                        AuditEvent.action,
+                        AuditEvent.resource_type,
+                        AuditEvent.resource_id,
+                        AuditEvent.resource_slug,
+                        AuditEvent.summary,
+                        AuditEvent.metadata_json,
+                        AuditEvent.created_at,
+                        AuditEvent.actor_user_id,
+                    ),
+                    selectinload(AuditEvent.actor).load_only(
+                        User.id,
+                        User.username,
+                        User.display_name,
+                        User.affiliation,
+                        User.is_verified,
+                    ),
+                )
                 .where(AuditEvent.actor_user_id == current_user.id)
                 .order_by(AuditEvent.created_at.desc())
                 .limit(20)

@@ -6,7 +6,7 @@ API_KEY  ?=
 OUTPUT   ?= backup-$(shell date +%Y%m%d-%H%M%S).sql
 FORMAT   ?= plain
 
-.PHONY: dev migrate seed test lint loadtest verify \
+.PHONY: dev migrate seed test lint loadtest loadtest-account loadtest-review verify \
         check-restore check-artifacts db-backup db-backup-print
 
 dev:
@@ -29,7 +29,30 @@ lint:
 	cd frontend && pnpm lint && pnpm typecheck
 
 loadtest:
-	cd backend && uv run python -m app.scripts.loadtest --url http://localhost:8000/health/live --requests 200 --concurrency 20
+	cd backend && uv run python -m app.scripts.loadtest \
+		--scenario browse \
+		--api-url $(API_URL) \
+		--requests 200 \
+		--concurrency 20 \
+		--warmup 20
+
+loadtest-account:
+	cd backend && uv run python -m app.scripts.loadtest \
+		--scenario account \
+		--api-url $(API_URL) \
+		--api-key $(API_KEY) \
+		--requests 100 \
+		--concurrency 10 \
+		--warmup 10
+
+loadtest-review:
+	cd backend && uv run python -m app.scripts.loadtest \
+		--scenario review \
+		--api-url $(API_URL) \
+		--api-key $(API_KEY) \
+		--requests 90 \
+		--concurrency 6 \
+		--warmup 6
 
 verify: lint test
 	cd frontend && pnpm build
