@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     # Cache-Control max-age (seconds) advertised on cacheable public GET responses
     # alongside a weak ETag, so CDNs/browsers can serve unchanged registry data.
     http_cache_max_age: int = 30
+    # How long a cached response for an Idempotency-Key is replayable (default 24h).
+    idempotency_ttl_seconds: int = 86400
 
     # Rate limiting — set to false to disable globally (e.g. in integration tests).
     # When enabled, a Redis-backed fixed-window limiter is applied to public

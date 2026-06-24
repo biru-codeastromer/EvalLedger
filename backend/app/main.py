@@ -17,9 +17,15 @@ from starlette.responses import Response
 from app.config import get_settings
 from app.database import engine
 from app.errors import error_response, register_exception_handlers
+from app.idempotency import (
+    IDEMPOTENCY_HEADER,
+    build_idempotency_key,
+    decode_cached_response,
+    encode_cached_response,
+)
 from app.logging import configure_logging, logger
 from app.metrics import observe_request, render_latest
-from app.ratelimit import set_limiter
+from app.ratelimit import get_limiter, set_limiter
 from app.routers import admin, auth, benchmarks, contamination, oauth, reports, search, stats, versions
 from app.services.storage import StorageService
 
@@ -93,7 +99,8 @@ app = FastAPI(
         "Registry for AI benchmark provenance: citable versions, verifiable artifact "
         "hashes, and inspectable contamination reports. Public read endpoints are "
         "rate-limited and emit `X-RateLimit-*` headers; cacheable responses carry an "
-        "`ETag`. Operational metrics are exposed at `/metrics` (Prometheus)."
+        "`ETag`. POST writes accept an `Idempotency-Key` header for safe retries. "
+        "Operational metrics are exposed at `/metrics` (Prometheus)."
     ),
     lifespan=lifespan,
     docs_url="/docs",
@@ -185,6 +192,64 @@ def _record_metrics(request: Request, status_code: int, duration_seconds: float)
     route = request.scope.get("route")
     path_label = getattr(route, "path", None) or "unmatched"
     observe_request(request.method, path_label, status_code, duration_seconds)
+
+
+@app.middleware("http")
+async def idempotency(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """Opt-in Idempotency-Key replay for POST writes (no-op without the header).
+
+    Defined before request_context so it nests *inside* it — replays still pass
+    through request_context for X-Request-ID, metrics and logging.
+    """
+    idem_key = request.headers.get(IDEMPOTENCY_HEADER)
+    redis = get_limiter()
+    if request.method != "POST" or not idem_key or redis is None:
+        return await call_next(request)
+
+    credential = (
+        request.headers.get("authorization") or request.headers.get("x-api-key") or _client_ip(request)
+    )
+    redis_key = build_idempotency_key(credential, request.url.path, idem_key)
+
+    try:
+        cached = await redis.get(redis_key)
+    except Exception:
+        cached = None  # fail open on Redis error
+    if cached:
+        try:
+            status_code, content_type, body = decode_cached_response(cached)
+            replay = Response(content=body, status_code=status_code, media_type=content_type)
+            replay.headers["Idempotency-Replay"] = "true"
+            return replay
+        except ValueError:
+            pass  # corrupt cache entry — recompute
+
+    response = await call_next(request)
+    body_iterator = getattr(response, "body_iterator", None)
+    if body_iterator is None:
+        return response  # non-streaming response we can't buffer; pass through
+    body = b""
+    async for chunk in body_iterator:
+        body += chunk
+    if response.status_code < 500:
+        try:
+            await redis.set(
+                redis_key,
+                encode_cached_response(
+                    response.status_code,
+                    response.media_type or response.headers.get("content-type", "application/json"),
+                    body,
+                ),
+                ex=settings.idempotency_ttl_seconds,
+                nx=True,
+            )
+        except Exception:
+            pass  # fail open on Redis error
+    rebuilt = Response(content=body, status_code=response.status_code, media_type=response.media_type)
+    for header_key, header_value in response.headers.items():
+        if header_key.lower() != "content-length":
+            rebuilt.headers[header_key] = header_value
+    return rebuilt
 
 
 @app.middleware("http")
