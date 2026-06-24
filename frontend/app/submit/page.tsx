@@ -180,7 +180,19 @@ export default function SubmitPage() {
                 <input value={paperUrl} onChange={(event) => setPaperUrl(event.target.value)} placeholder="Paper URL" className="w-full rounded-sm border px-4 py-4" style={{ borderColor: "var(--border)", background: "var(--bg)" }} />
                 <input value={githubUrl} onChange={(event) => setGithubUrl(event.target.value)} placeholder="GitHub URL" className="w-full rounded-sm border px-4 py-4" style={{ borderColor: "var(--border)", background: "var(--bg)" }} />
                 <textarea value={releaseNotes} onChange={(event) => setReleaseNotes(event.target.value)} placeholder="Release notes" className="min-h-[180px] w-full rounded-sm border px-4 py-4" style={{ borderColor: "var(--border)", background: "var(--bg)" }} />
-                <input type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+                <div className="flex items-center gap-3">
+                  <label className="btn-secondary cursor-pointer">
+                    Choose file
+                    <input
+                      type="file"
+                      className="sr-only"
+                      onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                  <span className="ui-copy text-[14px] text-[var(--muted)]">
+                    {file ? file.name : "No file selected"}
+                  </span>
+                </div>
                 {sha ? <CodeBlock code={sha} /> : null}
                 <div className="flex gap-3">
                   <button type="button" className="btn-secondary" onClick={() => setStep(1)}>

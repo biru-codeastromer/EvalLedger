@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { ActivityFeed } from "@/components/ui/ActivityFeed";
+import { Skeleton } from "@/components/ui/Skeleton";
 import {
   APIError,
   addReviewNote,
@@ -606,7 +607,32 @@ export default function ReviewPage() {
           )}
         </div>
         {reviewQueueQuery.isLoading ? (
-          <p className="text-[14px] text-[var(--text-dim)]">Loading queue…</p>
+          <div role="status" aria-label="Loading review queue" className="space-y-4">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div
+                key={index}
+                className="space-y-3 rounded-sm border p-5"
+                style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+              >
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0 space-y-2">
+                    <Skeleton className="h-6 w-48" />
+                    <Skeleton className="h-3 w-72" />
+                  </div>
+                  <div className="flex flex-shrink-0 gap-2">
+                    <Skeleton className="h-8 w-28" />
+                    <Skeleton className="h-8 w-20" />
+                    <Skeleton className="h-8 w-28" />
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  <Skeleton className="h-3 w-40" />
+                  <Skeleton className="h-3 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : reviewQueueQuery.isError ? (
           <p className="text-[14px] text-red-600">
             Failed to load queue:{" "}

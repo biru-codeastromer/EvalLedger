@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import { ActivityFeed } from "@/components/ui/ActivityFeed";
 import { CodeBlock } from "@/components/ui/CodeBlock";
+import { Skeleton } from "@/components/ui/Skeleton";
 import {
   APIError,
   createApiKey,
@@ -77,8 +78,86 @@ export default function AccountPage() {
 
   if (profileQuery.isLoading) {
     return (
-      <div className="page-frame section-space">
-        <p className="text-[16px] text-[var(--text-dim)]">Loading your account…</p>
+      <div
+        className="page-frame section-space space-y-12"
+        role="status"
+        aria-label="Loading account"
+      >
+        <section className="grid gap-8 md:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-10 w-full max-w-3xl" />
+            <Skeleton className="h-9 w-3/4 max-w-2xl" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full max-w-2xl" />
+              <Skeleton className="h-4 w-5/6 max-w-2xl" />
+            </div>
+          </div>
+          <div className="surface rounded-sm p-6">
+            <Skeleton className="mb-3 h-3 w-16" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-2/3" />
+              <Skeleton className="h-4 w-1/2" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
+            <Skeleton className="mt-6 h-10 w-28" />
+          </div>
+        </section>
+
+        <section className="grid gap-8 md:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            <Skeleton className="h-3 w-36" />
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="rounded-sm border p-4"
+                  style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <Skeleton className="h-7 w-48" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                  <Skeleton className="mt-2 h-4 w-40" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-sm border p-6" style={{ borderColor: "var(--border)" }}>
+            <Skeleton className="h-3 w-20" />
+            <div className="flex gap-3">
+              <Skeleton className="h-12 w-full" />
+              <Skeleton className="h-12 w-20" />
+            </div>
+            <div className="space-y-3">
+              {Array.from({ length: 2 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="rounded-sm border p-4"
+                  style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-32" />
+                      <Skeleton className="h-3 w-40" />
+                    </div>
+                    <Skeleton className="h-10 w-20" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-4">
+          <Skeleton className="h-3 w-32" />
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Skeleton key={index} className="h-4 w-full max-w-xl" />
+            ))}
+          </div>
+        </section>
       </div>
     );
   }
