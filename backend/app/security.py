@@ -13,6 +13,8 @@ from app.errors import AppError
 
 settings = get_settings()
 
+JWT_ISSUER = "evalledger"
+
 
 def hash_password(password: str) -> str:
     """Hash a password using bcrypt."""
@@ -33,6 +35,7 @@ def create_access_token(
     minutes = expiry_minutes if expiry_minutes is not None else settings.jwt_expiration_minutes
     payload: dict[str, Any] = {
         "sub": subject,
+        "iss": JWT_ISSUER,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=minutes)).timestamp()),
     }
@@ -43,7 +46,12 @@ def create_access_token(
 
 def decode_access_token(token: str) -> dict[str, Any]:
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+            issuer=JWT_ISSUER,
+        )
     except jwt.PyJWTError as exc:
         raise AppError("invalid_token", "Invalid or expired access token", status_code=401) from exc
     if not isinstance(payload, dict):

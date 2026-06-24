@@ -57,6 +57,7 @@ module = [
   "aiofiles",
   "boto3",
   "botocore.client",
+  "botocore.config",
   "botocore.exceptions",
   "celery",
   "celery.result",

@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     # Leave empty to auto-derive from database_url. Works with both Render
     # (which injects postgres:// URLs) and Fly.io (fly postgres attach).
     sync_database_url: str = ""
+    # SQLAlchemy async engine connection-pool tuning.
+    db_pool_size: int = 10  # Persistent connections kept open per process.
+    db_max_overflow: int = 20  # Extra connections allowed past pool_size under load.
+    db_pool_timeout: int = 30  # Seconds to wait for a free connection before erroring.
+    db_pool_recycle_seconds: int = 1800  # Recycle connections older than this to dodge stale TCP.
+    db_pool_pre_ping: bool = True  # Validate connections with a ping before handing them out.
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
@@ -61,10 +67,20 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_health_requests: bool = False
 
+    # Number of trusted reverse proxies in front of the app. Controls how many
+    # X-Forwarded-For hops are honoured when deriving the real client IP.
+    trusted_proxy_count: int = 1
+    # Hard ceiling on request body size in bytes (default 300 MiB) enforced
+    # before route handlers run, to bound memory and reject oversized uploads.
+    max_request_body_bytes: int = 314572800
+
     # Rate limiting — set to false to disable globally (e.g. in integration tests).
     # When enabled, a Redis-backed fixed-window limiter is applied to public
     # and write endpoints.  See app/ratelimit.py for bucket definitions.
     rate_limit_enabled: bool = True
+    # Per-window download request quotas, split by caller identity.
+    download_rate_limit_anon: int = 60  # Requests allowed for anonymous clients.
+    download_rate_limit_auth: int = 120  # Requests allowed for authenticated clients.
 
     # Set to true only when a Celery worker process is actually deployed.
     # On Render free tier (API-only), this remains false and contamination

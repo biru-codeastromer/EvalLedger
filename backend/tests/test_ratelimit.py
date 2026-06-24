@@ -13,6 +13,7 @@ from app.ratelimit import (
     get_client_id,
     is_authenticated,
 )
+from app.security import create_access_token
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,26 +63,31 @@ def test_rate_limit_error_attributes() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_get_client_id_prefers_api_key() -> None:
-    req = _make_request(api_key="el_abc123", forwarded_for="10.0.0.1", authorization="Bearer tok")
-    cid = get_client_id(req)
-    assert cid.startswith("key:")
-    # Different raw keys must hash to different identifiers.
-    req2 = _make_request(api_key="el_different")
-    assert get_client_id(req2) != cid
+def test_get_client_id_api_key_alone_keys_by_ip() -> None:
+    """An X-API-Key never gets its own bucket — it cannot be validated here,
+    so the caller is keyed by IP to prevent rotation-based limit bypass."""
+    req = _make_request(api_key="el_abc123", client_host="192.168.1.50")
+    assert get_client_id(req) == "ip:192.168.1.50"
 
 
-def test_get_client_id_falls_back_to_bearer() -> None:
-    req = _make_request(authorization="Bearer mytoken", forwarded_for="10.0.0.1")
-    cid = get_client_id(req)
-    assert cid.startswith("tok:")
+def test_get_client_id_valid_bearer_keys_by_token() -> None:
+    """A cryptographically valid JWT keys on the token hash (its own bucket)."""
+    token = create_access_token("user-123")
+    req = _make_request(authorization=f"Bearer {token}", forwarded_for="10.0.0.1")
+    assert get_client_id(req).startswith("tok:")
 
 
-def test_get_client_id_falls_back_to_forwarded_for() -> None:
+def test_get_client_id_forged_bearer_keys_by_ip() -> None:
+    """A forged/expired token must fall back to the anonymous IP bucket."""
+    req = _make_request(authorization="Bearer not-a-jwt", client_host="203.0.113.9")
+    assert get_client_id(req) == "ip:203.0.113.9"
+
+
+def test_get_client_id_uses_trusted_proxy_hop() -> None:
+    # With the default trusted_proxy_count=1, only the right-most (proxy-appended)
+    # hop is trusted; a client-spoofed left-most entry is ignored.
     req = _make_request(forwarded_for="203.0.113.5, 10.0.0.1")
-    cid = get_client_id(req)
-    # Takes the leftmost (original) IP only.
-    assert cid == "ip:203.0.113.5"
+    assert get_client_id(req) == "ip:10.0.0.1"
 
 
 def test_get_client_id_falls_back_to_direct_ip() -> None:
@@ -102,12 +108,18 @@ def test_get_client_id_hides_raw_api_key() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_is_authenticated_with_api_key() -> None:
-    assert is_authenticated(_make_request(api_key="el_key")) is True
+def test_is_authenticated_api_key_is_not_authenticated() -> None:
+    """An API key must not grant the higher tier (it can't be validated here)."""
+    assert is_authenticated(_make_request(api_key="el_key")) is False
 
 
-def test_is_authenticated_with_bearer() -> None:
-    assert is_authenticated(_make_request(authorization="Bearer tok")) is True
+def test_is_authenticated_valid_bearer() -> None:
+    token = create_access_token("user-1")
+    assert is_authenticated(_make_request(authorization=f"Bearer {token}")) is True
+
+
+def test_is_authenticated_forged_bearer() -> None:
+    assert is_authenticated(_make_request(authorization="Bearer nope")) is False
 
 
 def test_is_authenticated_anonymous() -> None:
@@ -208,7 +220,8 @@ async def test_rate_limit_dependency_uses_auth_limit_for_authenticated() -> None
 
     with patch("app.ratelimit.RateLimiter.check", new=_capture):
         dep = RateLimit("test", anon_limit=30, auth_limit=120)
-        request = _make_request(api_key="el_somekey")
+        # Only a valid JWT earns the auth tier now (not a bare API key).
+        request = _make_request(authorization=f"Bearer {create_access_token('u1')}")
         with patch("app.config.get_settings") as mock_settings:
             mock_settings.return_value.rate_limit_enabled = True
             await dep(request)

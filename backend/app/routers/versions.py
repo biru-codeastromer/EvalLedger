@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Annotated, Any
@@ -43,6 +43,13 @@ CitationFormatQuery = Annotated[str | None, Query()]
 
 _version_logger = logging.getLogger("evalledger.versions")
 _version_create_rl = Depends(RateLimit("version_create", anon_limit=10, auth_limit=10))
+_download_rl = Depends(
+    RateLimit(
+        "version_download",
+        anon_limit=settings.download_rate_limit_anon,
+        auth_limit=settings.download_rate_limit_auth,
+    )
+)
 
 
 def _parse_json_field(raw_value: str | None) -> dict[str, Any] | None:
@@ -162,42 +169,49 @@ async def create_version(
                 "released_at must be a valid ISO-8601 datetime",
                 status_code=400,
             ) from exc
-    version_record = BenchmarkVersion(
-        benchmark_id=benchmark.id,
-        version=version,
-        artifact_sha256=stored.sha256,
-        artifact_url=storage_reference,
-        artifact_size_bytes=stored.size_bytes,
-        num_examples=num_examples,
-        splits=_parse_json_field(splits),
-        language=_parse_language_field(language),
-        license=license,
-        paper_url=paper_url,
-        paper_arxiv_id=paper_arxiv_id,
-        github_url=github_url,
-        metadata_json=_parse_json_field(metadata),
-        release_notes=release_notes,
-        released_at=parsed_released_at,
-        submitter_id=current_user.id,
-        contamination_status="pending" if settings.worker_enabled else "unchecked",
-    )
-    versioning_service.apply_citation_string(benchmark, version_record)
-    session.add(version_record)
-    benchmark.total_versions = benchmark.total_versions + 1
-    await session.flush()
-    await record_audit_event(
-        session,
-        action="version.created",
-        actor=current_user,
-        benchmark=benchmark,
-        version=version_record,
-        resource_type="version",
-        resource_id=str(version_record.id),
-        resource_slug=f"{benchmark.slug}:{version_record.version}",
-        summary=f"Registered version {version_record.version} for {benchmark.slug}",
-        metadata={"artifact_size_bytes": stored.size_bytes, "artifact_sha256": stored.sha256},
-    )
-    await session.commit()
+        if parsed_released_at.tzinfo is None:
+            parsed_released_at = parsed_released_at.replace(tzinfo=UTC)
+    try:
+        version_record = BenchmarkVersion(
+            benchmark_id=benchmark.id,
+            version=version,
+            artifact_sha256=stored.sha256,
+            artifact_url=storage_reference,
+            artifact_size_bytes=stored.size_bytes,
+            num_examples=num_examples,
+            splits=_parse_json_field(splits),
+            language=_parse_language_field(language),
+            license=license,
+            paper_url=paper_url,
+            paper_arxiv_id=paper_arxiv_id,
+            github_url=github_url,
+            metadata_json=_parse_json_field(metadata),
+            release_notes=release_notes,
+            released_at=parsed_released_at,
+            submitter_id=current_user.id,
+            contamination_status="pending" if settings.worker_enabled else "unchecked",
+        )
+        versioning_service.apply_citation_string(benchmark, version_record)
+        session.add(version_record)
+        benchmark.total_versions = Benchmark.total_versions + 1
+        await session.flush()
+        await record_audit_event(
+            session,
+            action="version.created",
+            actor=current_user,
+            benchmark=benchmark,
+            version=version_record,
+            resource_type="version",
+            resource_id=str(version_record.id),
+            resource_slug=f"{benchmark.slug}:{version_record.version}",
+            summary=f"Registered version {version_record.version} for {benchmark.slug}",
+            metadata={"artifact_size_bytes": stored.size_bytes, "artifact_sha256": stored.sha256},
+        )
+        await session.commit()
+    except Exception:
+        # Roll back the orphaned artifact so storage does not drift from the DB.
+        await storage_service.delete(storage_reference)
+        raise
     await session.refresh(version_record)
     await session.refresh(benchmark)
 
@@ -243,6 +257,7 @@ async def download_version(
     slug: str,
     version: str,
     session: SessionDep,
+    _rl: Annotated[None, _download_rl] = None,
 ) -> FileResponse | RedirectResponse:
     benchmark = await _fetch_benchmark(session, slug)
     version_record = await session.scalar(

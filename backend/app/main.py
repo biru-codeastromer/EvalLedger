@@ -15,7 +15,7 @@ from starlette.responses import Response
 
 from app.config import get_settings
 from app.database import engine
-from app.errors import register_exception_handlers
+from app.errors import error_response, register_exception_handlers
 from app.logging import configure_logging, logger
 from app.ratelimit import set_limiter
 from app.routers import admin, auth, benchmarks, contamination, oauth, search, stats, versions
@@ -67,6 +67,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         set_limiter(None)
         if redis_client is not None:
             await redis_client.aclose()
+        await engine.dispose()
 
 
 app = FastAPI(
@@ -80,22 +81,44 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
+    expose_headers=["X-Request-ID"],
 )
 
 register_exception_handlers(app)
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the real client IP, honouring trusted reverse-proxy hops.
+
+    ``trusted_proxy_count`` is how many proxies sit in front of the app (e.g.
+    Render's load balancer).  X-Forwarded-For is appended left-to-right, so the
+    client's address is the hop ``trusted_proxy_count`` from the right.  When
+    fewer hops are present than configured, we clamp to the left-most element.
+    """
+    forwarded = request.headers.get("x-forwarded-for", "")
+    hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+    if hops:
+        index = max(-len(hops), -settings.trusted_proxy_count)
+        return hops[index]
+    return request.client.host if request.client else "unknown"
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     request_id = request.headers.get("x-request-id") or uuid4().hex
     request.state.request_id = request_id
-    # Prefer X-Forwarded-For (Render proxy) over direct client host for IP logging.
-    client_ip = (
-        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        or (request.client.host if request.client else "unknown")
-    )
+    # Reject oversized payloads up front, before the body is buffered/parsed.
+    content_length = request.headers.get("content-length")
+    if content_length is not None and int(content_length) > settings.max_request_body_bytes:
+        return error_response(
+            "payload_too_large",
+            "Request body too large",
+            status_code=413,
+            details={"request_id": request_id, "limit_bytes": settings.max_request_body_bytes},
+        )
+    client_ip = _client_ip(request)
     started_at = perf_counter()
     try:
         response = await call_next(request)

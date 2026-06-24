@@ -4,6 +4,8 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
@@ -108,6 +110,21 @@ def register_exception_handlers(app: FastAPI) -> None:
             detail.get("detail", "Request failed"),
             status_code=exc.status_code,
             details=detail,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", None)
+        details: dict[str, Any] = {"errors": jsonable_encoder(exc.errors())}
+        if request_id is not None:
+            details["request_id"] = request_id
+        return error_response(
+            "validation_error",
+            "Request validation failed",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            details=details,
         )
 
     @app.exception_handler(IntegrityError)

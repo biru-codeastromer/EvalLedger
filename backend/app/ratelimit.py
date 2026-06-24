@@ -7,10 +7,13 @@ Design
   where ``window_slot = int(time.time()) // window_seconds``.
 
 * Client identity priority (most to least specific):
-    1. X-API-Key header              → SHA-256 prefix (16 hex chars)
-    2. Authorization: Bearer …       → SHA-256 prefix
-    3. X-Forwarded-For first hop     → raw IP (already an opaque network id)
-    4. Direct client IP
+    1. Authorization: Bearer …, *cryptographically valid* → SHA-256 prefix
+    2. Client IP, resolved from X-Forwarded-For honouring the configured
+       trusted-proxy count (falls back to the direct ``request.client.host``)
+
+  An ``X-API-Key`` does NOT grant identity here: the limiter has no DB and
+  cannot validate it, so trusting it would let a rotated/forged key pick its
+  own (higher) tier and bucket — the rotation bypass this module guards against.
 
 * Fail-open: if Redis is unavailable, the request is allowed through and a
   WARNING is logged.  The API stays up during Redis restarts.
@@ -41,6 +44,7 @@ from fastapi import Request, status
 from redis.asyncio import Redis
 
 from app.errors import AppError
+from app.security import decode_access_token
 
 logger = logging.getLogger("evalledger.ratelimit")
 
@@ -90,40 +94,85 @@ def _sha256_prefix(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:16]
 
 
-def get_client_id(request: Request) -> str:
-    """Return a stable, opaque identifier for the caller.
+def _bearer_token(request: Request) -> str | None:
+    """Return the raw bearer token from the Authorization header, if present.
 
-    Priority:
-    1. X-API-Key header (hashed — raw token never appears in Redis)
-    2. Authorization: Bearer … (hashed)
-    3. X-Forwarded-For first IP (leftmost = original client behind Render proxy)
-    4. Direct ``request.client.host``
+    Returns ``None`` when there is no ``Authorization: Bearer …`` header or the
+    token portion is empty.  No validation is performed here.
     """
-    api_key = request.headers.get("x-api-key")
-    if api_key:
-        return f"key:{_sha256_prefix(api_key)}"
-
     auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        token = auth[7:].strip()
-        if token:
-            return f"tok:{_sha256_prefix(token)}"
+    if not auth.lower().startswith("bearer "):
+        return None
+    token = auth[7:].strip()
+    return token or None
+
+
+def _valid_bearer_token(request: Request) -> str | None:
+    """Return the bearer token only if it is a cryptographically valid JWT.
+
+    A token is considered valid when :func:`decode_access_token` accepts it
+    (signature, algorithm and expiry all check out).  Any :class:`AppError`
+    from decoding means the token is missing, malformed or forged, so we treat
+    the caller as unauthenticated.  An ``X-API-Key`` is intentionally ignored:
+    the limiter cannot validate it without a DB, so it must not grant identity
+    or the higher tier.
+    """
+    token = _bearer_token(request)
+    if token is None:
+        return None
+    try:
+        decode_access_token(token)
+    except AppError:
+        return None
+    return token
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the caller's IP, honouring the trusted-proxy count.
+
+    ``X-Forwarded-For`` is a comma-separated list appended hop-by-hop, so only
+    the right-most ``trusted_proxy_count`` entries are written by infrastructure
+    we control.  We pick the entry at ``index -trusted_proxy_count`` (the IP
+    handed to the outermost trusted proxy), clamping to the left-most element
+    when the client supplied fewer hops than expected.  Without a usable header
+    we fall back to the direct socket peer.
+    """
+    from app.config import get_settings
 
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
-        ip = forwarded_for.split(",")[0].strip()
-        return f"ip:{ip}"
+        hops = [hop.strip() for hop in forwarded_for.split(",") if hop.strip()]
+        if hops:
+            proxy_count = max(1, get_settings().trusted_proxy_count)
+            index = max(0, len(hops) - proxy_count)
+            return hops[index]
 
-    host = request.client.host if request.client else "unknown"
-    return f"ip:{host}"
+    return request.client.host if request.client else "unknown"
+
+
+def get_client_id(request: Request) -> str:
+    """Return a stable, opaque identifier for the caller.
+
+    A cryptographically valid bearer JWT keys on the token's hash so that a
+    single authenticated principal shares one bucket regardless of source IP.
+    Everyone else (anonymous, API-key-only, or forged/expired tokens) keys on
+    the resolved client IP.
+    """
+    token = _valid_bearer_token(request)
+    if token is not None:
+        return f"tok:{_sha256_prefix(token)}"
+
+    return f"ip:{_client_ip(request)}"
 
 
 def is_authenticated(request: Request) -> bool:
-    """Return True if the request carries an API key or Bearer token."""
-    return bool(
-        request.headers.get("x-api-key")
-        or request.headers.get("authorization", "").lower().startswith("bearer ")
-    )
+    """Return True only for a request carrying a valid bearer JWT.
+
+    Header presence alone is not enough, and an ``X-API-Key`` never qualifies:
+    granting the higher tier on an unvalidated credential is the rotation
+    bypass this module exists to close.
+    """
+    return _valid_bearer_token(request) is not None
 
 
 # ---------------------------------------------------------------------------

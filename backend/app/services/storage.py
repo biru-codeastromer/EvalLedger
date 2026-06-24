@@ -10,6 +10,7 @@ from uuid import uuid4
 import aiofiles
 import boto3
 from botocore.client import BaseClient
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from app.config import Settings, get_settings
@@ -45,6 +46,11 @@ class StorageService:
                     aws_access_key_id=self.settings.storage_s3_access_key_id,
                     aws_secret_access_key=self.settings.storage_s3_secret_access_key,
                     region_name=self.settings.storage_s3_region,
+                    config=Config(
+                        connect_timeout=5,
+                        read_timeout=30,
+                        retries={"max_attempts": 3, "mode": "standard"},
+                    ),
                 ),
             )
         return self._client
@@ -162,6 +168,28 @@ class StorageService:
             return cast(bytes, response["Body"].read())
 
         return await asyncio.to_thread(_read)
+
+    async def delete(self, storage_key_or_url: str) -> None:
+        if self.settings.storage_backend == "local":
+            def _unlink() -> None:
+                Path(storage_key_or_url).unlink(missing_ok=True)
+
+            await asyncio.to_thread(_unlink)
+            return
+
+        def _delete() -> None:
+            try:
+                self.client.delete_object(
+                    Bucket=self.settings.storage_bucket, Key=storage_key_or_url
+                )
+            except ClientError as exc:
+                code = exc.response["Error"]["Code"]
+                if code in {"404", "NoSuchKey"}:
+                    # Object already absent — deletion is idempotent.
+                    return
+                raise
+
+        await asyncio.to_thread(_delete)
 
     async def generate_download_url(self, storage_key_or_url: str) -> str:
         if self.settings.storage_backend == "local":
