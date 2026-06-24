@@ -101,6 +101,26 @@ _GITHUB_USER_URL = "https://api.github.com/user"
 _GITHUB_EMAILS_URL = "https://api.github.com/user/emails"
 
 
+def _verified_primary_email(entries: object) -> str | None:
+    """Return the verified *primary* email from a GitHub ``/user/emails`` payload.
+
+    Only an address GitHub reports as both ``primary`` and ``verified`` is
+    returned; anything else yields ``None``.  We deliberately ignore the public
+    profile email (``/user``'s ``email`` field) because it can be an
+    unverified, user-chosen address: trusting it for find-or-create account
+    linking would let an attacker take over another user's account by setting
+    that user's email as their own public profile email.
+    """
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("primary") and entry.get("verified"):
+            value = entry.get("email")
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
 @router.get("/github")
 async def github_oauth_start(request: Request) -> RedirectResponse:
     """Redirect the user to the GitHub OAuth consent screen."""
@@ -191,16 +211,14 @@ async def github_oauth_callback(
             return _frontend_error_redirect("Could not retrieve your GitHub profile.")
         gh_user = user_resp.json()
 
-        # GitHub hides emails when "Keep my email addresses private" is enabled.
-        # Fall back to the verified primary email from the /user/emails API.
-        email: str | None = gh_user.get("email")
-        if not email:
-            emails_resp = await client.get(_GITHUB_EMAILS_URL, headers=gh_headers)
-            if emails_resp.status_code == 200:
-                for entry in emails_resp.json():
-                    if entry.get("primary") and entry.get("verified"):
-                        email = entry["email"]
-                        break
+        # Always resolve a *verified* primary email from the /user/emails API.
+        # We never trust gh_user["email"] (the public profile email) for
+        # account linking because it may be unverified — see
+        # _verified_primary_email for the account-takeover rationale.
+        email: str | None = None
+        emails_resp = await client.get(_GITHUB_EMAILS_URL, headers=gh_headers)
+        if emails_resp.status_code == 200:
+            email = _verified_primary_email(emails_resp.json())
 
     try:
         user = await find_or_create_oauth_user(

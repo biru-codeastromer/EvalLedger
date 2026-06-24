@@ -310,3 +310,34 @@ async def test_google_callback_error_param_redirects(monkeypatch: pytest.MonkeyP
     )
     assert response.status_code == 302
     assert "/login" in response.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# GitHub verified-primary-email selection (account-takeover guard)
+# ---------------------------------------------------------------------------
+
+
+def test_verified_primary_email_selects_verified_primary() -> None:
+    """The verified primary address is chosen, never a non-primary one."""
+    entries = [
+        {"email": "secondary@example.com", "primary": False, "verified": True},
+        {"email": "primary@example.com", "primary": True, "verified": True},
+    ]
+    assert oauth_router._verified_primary_email(entries) == "primary@example.com"
+
+
+def test_verified_primary_email_ignores_unverified_primary() -> None:
+    """An unverified primary email must never be trusted (takeover vector)."""
+    entries = [{"email": "attacker@example.com", "primary": True, "verified": False}]
+    assert oauth_router._verified_primary_email(entries) is None
+
+
+def test_verified_primary_email_ignores_verified_non_primary() -> None:
+    entries = [{"email": "verified@example.com", "primary": False, "verified": True}]
+    assert oauth_router._verified_primary_email(entries) is None
+
+
+def test_verified_primary_email_handles_malformed_payloads() -> None:
+    assert oauth_router._verified_primary_email(None) is None
+    assert oauth_router._verified_primary_email({"email": "x"}) is None
+    assert oauth_router._verified_primary_email([{"primary": True, "verified": True}]) is None

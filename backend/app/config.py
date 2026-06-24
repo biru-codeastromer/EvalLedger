@@ -106,6 +106,27 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _validate_production_jwt_secret(self) -> Settings:
+        """Refuse to boot in production with an insecure JWT signing key.
+
+        ``JWT_SECRET_KEY`` signs the session and OAuth-state tokens, so a
+        forgeable key lets anyone mint a token for any user.  If the variable
+        is unset, left at the development default, or too short, fail loudly at
+        startup (mirroring ``_validate_s3_settings``) instead of silently
+        running with a guessable secret.  The development fallback stays usable
+        for local and test runs where ``app_env`` is not ``production``.
+        """
+        if self.app_env == "production":
+            insecure_defaults = {"", "evalledger-dev-secret"}
+            if self.jwt_secret_key in insecure_defaults or len(self.jwt_secret_key) < 16:
+                raise ValueError(
+                    "JWT_SECRET_KEY must be set to a strong, unique value "
+                    "(at least 16 characters and not the development default) "
+                    "when APP_ENV=production."
+                )
+        return self
+
+    @model_validator(mode="after")
     def _normalise_database_urls(self) -> Settings:
         """Rewrite bare ``postgres://`` / ``postgresql://`` URLs to the
         driver-specific schemes that SQLAlchemy expects.
