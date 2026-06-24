@@ -20,7 +20,7 @@ from app.errors import error_response, register_exception_handlers
 from app.logging import configure_logging, logger
 from app.metrics import observe_request, render_latest
 from app.ratelimit import set_limiter
-from app.routers import admin, auth, benchmarks, contamination, oauth, search, stats, versions
+from app.routers import admin, auth, benchmarks, contamination, oauth, reports, search, stats, versions
 from app.services.storage import StorageService
 
 # Paths that must never be cached or counted as cacheable public data.
@@ -34,6 +34,7 @@ _OPENAPI_TAGS = [
     {"name": "search", "description": "Full-text search across the registry."},
     {"name": "stats", "description": "Aggregate registry statistics and recent activity."},
     {"name": "admin", "description": "Maintainer review and verification workflow."},
+    {"name": "reports", "description": "Abuse/takedown reports and the moderation queue."},
 ]
 
 settings = get_settings()
@@ -245,6 +246,7 @@ app.include_router(versions.router, prefix="/benchmarks", tags=["versions"])
 app.include_router(search.router, tags=["search", "stats"])
 app.include_router(contamination.router, prefix="/contamination", tags=["contamination"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])
+app.include_router(reports.router, prefix="/reports", tags=["reports"])
 
 
 @app.get("/metrics", include_in_schema=False)

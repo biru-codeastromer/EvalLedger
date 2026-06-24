@@ -2,12 +2,14 @@ from app.models.api_key import APIKey
 from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
 from app.models.contamination import ContaminationReport, ReferenceCorpus
+from app.models.report import AbuseReport
 from app.models.user import User
 from app.models.user_identity import UserIdentity
 from app.models.version import BenchmarkVersion, Citation
 
 __all__ = [
     "APIKey",
+    "AbuseReport",
     "AuditEvent",
     "Benchmark",
     "BenchmarkVersion",
