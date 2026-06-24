@@ -14,7 +14,7 @@ const TASK_TYPES = ["multiple_choice", "generation", "code_completion"];
 export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string }) {
   const { query, setQuery, taskType, setTaskType, domains, toggleDomain } = useRegistryStore();
   const deferredQuery = useDeferredValue(query || initialQuery);
-  const { data = [], isLoading } = useQuery({
+  const { data = [], isLoading, isError, error } = useQuery({
     queryKey: ["benchmarks", deferredQuery],
     queryFn: () => getBenchmarks(deferredQuery)
   });
@@ -124,6 +124,13 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
         <div className="space-y-4">
           {isLoading ? (
             <p className="text-[var(--text-dim)]">Loading the registry...</p>
+          ) : isError ? (
+            <p className="text-[var(--text-dim)]">
+              Something went wrong loading the registry.
+              {error instanceof Error && error.message ? ` ${error.message}` : ""}
+            </p>
+          ) : filtered.length === 0 ? (
+            <p className="text-[var(--text-dim)]">No benchmarks match your search.</p>
           ) : (
             filtered.map((item) => <BenchmarkCard key={item.id} benchmark={item} />)
           )}

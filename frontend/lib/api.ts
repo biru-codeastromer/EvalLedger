@@ -16,8 +16,23 @@ import {
 } from "@/lib/types";
 import { getAccessToken } from "@/lib/session";
 
-const API_INTERNAL_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
-export const API_PUBLIC_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const LOCALHOST_API_URL = "http://localhost:8000";
+
+function resolveApiUrl(value: string | undefined, varName: string): string {
+  if (value) {
+    return value;
+  }
+  if (process.env.NODE_ENV === "production") {
+    console.warn(
+      `[EvalLedger] ${varName} is not set; falling back to ${LOCALHOST_API_URL}. ` +
+        "This is almost certainly a misconfiguration in production."
+    );
+  }
+  return LOCALHOST_API_URL;
+}
+
+const API_INTERNAL_URL = resolveApiUrl(process.env.API_INTERNAL_URL, "API_INTERNAL_URL");
+export const API_PUBLIC_URL = resolveApiUrl(process.env.NEXT_PUBLIC_API_URL, "NEXT_PUBLIC_API_URL");
 
 export class APIError extends Error {
   status: number;

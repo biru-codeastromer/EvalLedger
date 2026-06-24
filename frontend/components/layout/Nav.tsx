@@ -10,12 +10,15 @@ import { AuthResponse } from "@/lib/types";
 
 export function Nav() {
   const [session, setSession] = useState<AuthResponse | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     const sync = () => setSession(loadSession());
     sync();
     return subscribeToSessionChange(sync);
   }, []);
+
+  const closeMenu = () => setMenuOpen(false);
 
   return (
     <header
@@ -46,8 +49,44 @@ export function Nav() {
           <Link href="/submit" className="btn-primary">
             Submit Benchmark
           </Link>
+          <button
+            type="button"
+            aria-label="Toggle menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border text-[var(--text-dim)] md:hidden"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <span aria-hidden="true" className="text-[18px] leading-none">
+              {menuOpen ? "✕" : "☰"}
+            </span>
+          </button>
         </div>
       </div>
+      {menuOpen ? (
+        <nav
+          className="page-frame flex flex-col gap-4 border-t py-4 text-[14px] text-[var(--text-dim)] md:hidden"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <Link href="/registry" onClick={closeMenu}>
+            Registry
+          </Link>
+          <Link href="/contamination" onClick={closeMenu}>
+            Contamination
+          </Link>
+          <Link href="/standard" onClick={closeMenu}>
+            Standard
+          </Link>
+          {session?.user.is_admin ? (
+            <Link href={"/review" as Route} onClick={closeMenu}>
+              Review
+            </Link>
+          ) : null}
+          <a href="/docs" onClick={closeMenu}>
+            Docs
+          </a>
+        </nav>
+      ) : null}
     </header>
   );
 }

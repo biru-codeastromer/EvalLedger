@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Image from "next/image";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ContaminationReport as ReportList } from "@/components/contamination/ContaminationReport";
 import { OverlapVisualizer } from "@/components/contamination/OverlapVisualizer";
@@ -16,6 +16,72 @@ export default function ContaminationPage() {
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState<ContaminationReport[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activeJobId) {
+      return;
+    }
+    const MAX_ATTEMPTS = 60;
+    let attempts = 0;
+    let cancelled = false;
+    const stop = () => {
+      if (interval !== undefined) {
+        window.clearInterval(interval);
+        interval = undefined;
+      }
+    };
+    let interval: number | undefined = window.setInterval(async () => {
+      attempts += 1;
+      try {
+        const status = await getJob(activeJobId);
+        if (cancelled) {
+          return;
+        }
+        if (status.status === "unavailable") {
+          setError("Background processing is not available on this deployment.");
+          setLoading(false);
+          setActiveJobId(null);
+          stop();
+          return;
+        }
+        if (status.status === "completed") {
+          const result = status.result as { corpora: ContaminationReport[] };
+          setReports(result.corpora);
+          setLoading(false);
+          setActiveJobId(null);
+          stop();
+          return;
+        }
+        if (status.status === "failed") {
+          setError("The contamination job failed before results were returned.");
+          setLoading(false);
+          setActiveJobId(null);
+          stop();
+          return;
+        }
+        if (attempts >= MAX_ATTEMPTS) {
+          setError("The contamination job timed out before results were returned. Please try again.");
+          setLoading(false);
+          setActiveJobId(null);
+          stop();
+        }
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setError("We could not refresh the contamination job status.");
+        setLoading(false);
+        setActiveJobId(null);
+        stop();
+      }
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [activeJobId]);
 
   async function handleSubmit() {
     if (!file) {
@@ -24,6 +90,7 @@ export default function ContaminationPage() {
     setLoading(true);
     setError(null);
     setReports([]);
+    setActiveJobId(null);
     try {
       const formData = new FormData();
       formData.append("artifact", file);
@@ -37,32 +104,7 @@ export default function ContaminationPage() {
         );
         return;
       }
-      const interval = window.setInterval(async () => {
-        try {
-          const status = await getJob(job.job_id);
-          if (status.status === "unavailable") {
-            setError("Background processing is not available on this deployment.");
-            setLoading(false);
-            window.clearInterval(interval);
-            return;
-          }
-          if (status.status === "completed") {
-            const result = status.result as { corpora: ContaminationReport[] };
-            setReports(result.corpora);
-            setLoading(false);
-            window.clearInterval(interval);
-          }
-          if (status.status === "failed") {
-            setError("The contamination job failed before results were returned.");
-            setLoading(false);
-            window.clearInterval(interval);
-          }
-        } catch {
-          setError("We could not refresh the contamination job status.");
-          setLoading(false);
-          window.clearInterval(interval);
-        }
-      }, 1000);
+      setActiveJobId(job.job_id);
     } catch {
       setLoading(false);
       setError("We could not start the contamination check. Confirm the API is reachable and try again.");

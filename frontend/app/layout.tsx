@@ -59,8 +59,28 @@ const anthropicMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "EvalLedger",
-  description: "The open registry for AI benchmark provenance."
+  metadataBase: new URL("https://evalledger.dev"),
+  title: {
+    default: "EvalLedger",
+    template: "%s · EvalLedger"
+  },
+  description: "The open registry for AI benchmark provenance.",
+  openGraph: {
+    title: "EvalLedger",
+    description: "The open registry for AI benchmark provenance.",
+    url: "https://evalledger.dev",
+    siteName: "EvalLedger",
+    type: "website"
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "EvalLedger",
+    description: "The open registry for AI benchmark provenance."
+  },
+  robots: {
+    index: true,
+    follow: true
+  }
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
