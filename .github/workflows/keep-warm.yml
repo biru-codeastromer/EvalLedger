@@ -1,0 +1,17 @@
+name: Keep Backend Warm
+
+# Pings the Render free-tier backend so it does not spin down (~15 min idle
+# triggers a cold start, making the first request hang). Override the target by
+# setting BACKEND_HEALTHCHECK_URL in repo Settings -> Variables.
+
+on:
+  schedule:
+    - cron: "*/13 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping liveness endpoint
+        run: curl -fsS -m 60 "${{ vars.BACKEND_HEALTHCHECK_URL || 'https://evalledger-api.onrender.com/health/live' }}" || true
