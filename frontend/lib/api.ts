@@ -169,6 +169,20 @@ export async function createBenchmark(payload: Record<string, unknown>): Promise
   return parseResponse<BenchmarkDetail>(response);
 }
 
+export async function createReport(payload: {
+  resource_type: "benchmark" | "version";
+  resource_slug: string;
+  reason: string;
+  detail?: string;
+}): Promise<unknown> {
+  const response = await fetch(`${getBaseUrl(true)}/reports`, {
+    method: "POST",
+    headers: buildAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload)
+  });
+  return parseResponse<unknown>(response);
+}
+
 export async function runAdHocCheck(formData: FormData): Promise<{ job_id: string }> {
   const response = await fetch(`${getBaseUrl(true)}/contamination/check`, {
     method: "POST",

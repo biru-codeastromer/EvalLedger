@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { CitationBlock } from "@/components/registry/CitationBlock";
 import { ContaminationBadge } from "@/components/registry/ContaminationBadge";
+import { ReportButton } from "@/components/registry/ReportButton";
 import { VersionBadge } from "@/components/registry/VersionBadge";
 import { ActivityFeed } from "@/components/ui/ActivityFeed";
 import { getBenchmark, getBenchmarkActivity, getVersion, getVersions } from "@/lib/api";
@@ -28,6 +29,7 @@ export default async function BenchmarkDetailPage({ params }: { params: { slug: 
             ))}
             <span className="mono">{benchmark.task_type}</span>
             {benchmark.is_verified ? <span className="mono text-[var(--text)]">Verified</span> : null}
+            <ReportButton resourceType="benchmark" resourceSlug={benchmark.slug} />
           </div>
           <p className="mt-8 max-w-3xl text-[18px] leading-9 text-[var(--text-dim)]">
             {benchmark.description}
