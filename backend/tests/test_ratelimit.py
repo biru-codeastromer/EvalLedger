@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import Response
 
 from app.ratelimit import (
     RateLimit,
@@ -205,7 +206,7 @@ async def test_rate_limit_dependency_passes_when_enabled_and_under_limit() -> No
         dep = RateLimit("test", anon_limit=60, auth_limit=120)
         request = _make_request()
         # Must not raise.
-        await dep(request)
+        await dep(request, Response())
         mock_check.assert_called_once()
 
 
@@ -224,7 +225,7 @@ async def test_rate_limit_dependency_uses_auth_limit_for_authenticated() -> None
         request = _make_request(authorization=f"Bearer {create_access_token('u1')}")
         with patch("app.config.get_settings") as mock_settings:
             mock_settings.return_value.rate_limit_enabled = True
-            await dep(request)
+            await dep(request, Response())
 
     assert calls[0][2] == 120  # auth_limit passed to check
 
@@ -241,9 +242,30 @@ async def test_rate_limit_dependency_uses_anon_limit_for_unauthenticated() -> No
         request = _make_request()  # No API key or Bearer token.
         with patch("app.config.get_settings") as mock_settings:
             mock_settings.return_value.rate_limit_enabled = True
-            await dep(request)
+            await dep(request, Response())
 
     assert calls[0][2] == 30  # anon_limit used
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_dependency_sets_rate_limit_headers() -> None:
+    """The dependency surfaces the limiter state as X-RateLimit-* headers."""
+    from app.ratelimit import RateLimitState
+
+    async def _state(_self: object, name: str, client_id: str, limit: int, window_seconds: int) -> RateLimitState:
+        return RateLimitState(limit=limit, remaining=limit - 1, reset_seconds=42)
+
+    with patch("app.ratelimit.RateLimiter.check", new=_state):
+        dep = RateLimit("test", anon_limit=30, auth_limit=120)
+        request = _make_request()
+        response = Response()
+        with patch("app.config.get_settings") as mock_settings:
+            mock_settings.return_value.rate_limit_enabled = True
+            await dep(request, response)
+
+    assert response.headers["X-RateLimit-Limit"] == "30"
+    assert response.headers["X-RateLimit-Remaining"] == "29"
+    assert response.headers["X-RateLimit-Reset"] == "42"
 
 
 # ---------------------------------------------------------------------------

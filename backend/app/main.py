@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -17,9 +18,23 @@ from app.config import get_settings
 from app.database import engine
 from app.errors import error_response, register_exception_handlers
 from app.logging import configure_logging, logger
+from app.metrics import observe_request, render_latest
 from app.ratelimit import set_limiter
 from app.routers import admin, auth, benchmarks, contamination, oauth, search, stats, versions
 from app.services.storage import StorageService
+
+# Paths that must never be cached or counted as cacheable public data.
+_CACHE_EXEMPT_PREFIXES = ("/health", "/metrics", "/docs", "/redoc", "/openapi.json")
+
+_OPENAPI_TAGS = [
+    {"name": "auth", "description": "Sign-in (OAuth), the current user, and API-key management."},
+    {"name": "benchmarks", "description": "Benchmark registration, metadata, and discovery."},
+    {"name": "versions", "description": "Versioned artifact submission, download, and citations."},
+    {"name": "contamination", "description": "MinHash/LSH contamination reports and ad-hoc checks."},
+    {"name": "search", "description": "Full-text search across the registry."},
+    {"name": "stats", "description": "Aggregate registry statistics and recent activity."},
+    {"name": "admin", "description": "Maintainer review and verification workflow."},
+]
 
 settings = get_settings()
 
@@ -73,9 +88,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="EvalLedger API",
     version="0.1.0",
+    description=(
+        "Registry for AI benchmark provenance: citable versions, verifiable artifact "
+        "hashes, and inspectable contamination reports. Public read endpoints are "
+        "rate-limited and emit `X-RateLimit-*` headers; cacheable responses carry an "
+        "`ETag`. Operational metrics are exposed at `/metrics` (Prometheus)."
+    ),
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
+    contact={"name": "EvalLedger", "url": "https://evalledger.dev"},
+    license_info={"name": "See repository LICENSE"},
+    terms_of_service=f"{settings.frontend_url}/terms",
+    openapi_tags=_OPENAPI_TAGS,
+    servers=[{"url": settings.app_url, "description": settings.app_env}],
 )
 app.add_middleware(
     CORSMiddleware,
@@ -125,6 +151,41 @@ def _content_length_exceeds(request: Request, limit: int) -> bool:
         return False
 
 
+def _apply_http_caching(request: Request, response: Response) -> Response:
+    """Add ETag / Cache-Control to safe GETs and short-circuit 304 Not Modified.
+
+    Authenticated requests (which carry per-user data) get ``private, no-store``
+    and no shared ETag. Anonymous GETs of public registry data get a weak ETag
+    plus ``public, max-age`` so CDNs/browsers can revalidate cheaply. Health,
+    metrics and docs paths are exempt entirely.
+    """
+    if request.method != "GET" or response.status_code != 200:
+        return response
+    if request.url.path.startswith(_CACHE_EXEMPT_PREFIXES):
+        return response
+    if request.headers.get("authorization") or request.headers.get("x-api-key"):
+        response.headers.setdefault("Cache-Control", "private, no-store")
+        return response
+    body = getattr(response, "body", None)
+    if not isinstance(body, bytes | bytearray):
+        return response
+    etag = 'W/"' + hashlib.sha256(bytes(body)).hexdigest()[:32] + '"'
+    response.headers["ETag"] = etag
+    response.headers.setdefault("Cache-Control", f"public, max-age={settings.http_cache_max_age}")
+    if request.headers.get("if-none-match") == etag:
+        not_modified = Response(status_code=304)
+        not_modified.headers["ETag"] = etag
+        not_modified.headers["Cache-Control"] = response.headers["Cache-Control"]
+        return not_modified
+    return response
+
+
+def _record_metrics(request: Request, status_code: int, duration_seconds: float) -> None:
+    route = request.scope.get("route")
+    path_label = getattr(route, "path", None) or "unmatched"
+    observe_request(request.method, path_label, status_code, duration_seconds)
+
+
 @app.middleware("http")
 async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     request_id = request.headers.get("x-request-id") or uuid4().hex
@@ -144,7 +205,8 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
         else:
             response = await call_next(request)
     except Exception:
-        duration_ms = round((perf_counter() - started_at) * 1000, 2)
+        duration_s = perf_counter() - started_at
+        _record_metrics(request, 500, duration_s)
         logger.info(
             "request.completed",
             extra={
@@ -152,12 +214,13 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
                 "method": request.method,
                 "path": request.url.path,
                 "status_code": 500,
-                "duration_ms": duration_ms,
+                "duration_ms": round(duration_s * 1000, 2),
                 "client_ip": client_ip,
             },
         )
         raise
-    duration_ms = round((perf_counter() - started_at) * 1000, 2)
+    duration_s = perf_counter() - started_at
+    _record_metrics(request, response.status_code, duration_s)
     logger.info(
         "request.completed",
         extra={
@@ -165,10 +228,11 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
             "method": request.method,
             "path": request.url.path,
             "status_code": response.status_code,
-            "duration_ms": duration_ms,
+            "duration_ms": round(duration_s * 1000, 2),
             "client_ip": client_ip,
         },
     )
+    response = _apply_http_caching(request, response)
     response.headers["X-Request-ID"] = request_id
     return response
 
@@ -181,6 +245,13 @@ app.include_router(versions.router, prefix="/benchmarks", tags=["versions"])
 app.include_router(search.router, tags=["search", "stats"])
 app.include_router(contamination.router, prefix="/contamination", tags=["contamination"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    """Prometheus exposition of the RED metrics (request rate, errors, duration)."""
+    payload, content_type = render_latest()
+    return Response(content=payload, media_type=content_type)
 
 
 async def _database_ready() -> bool:

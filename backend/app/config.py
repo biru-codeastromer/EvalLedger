@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     # before route handlers run, to bound memory and reject oversized uploads.
     max_request_body_bytes: int = 314572800
 
+    # Cache-Control max-age (seconds) advertised on cacheable public GET responses
+    # alongside a weak ETag, so CDNs/browsers can serve unchanged registry data.
+    http_cache_max_age: int = 30
+
     # Rate limiting — set to false to disable globally (e.g. in integration tests).
     # When enabled, a Redis-backed fixed-window limiter is applied to public
     # and write endpoints.  See app/ratelimit.py for bucket definitions.

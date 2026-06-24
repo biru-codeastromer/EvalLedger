@@ -39,8 +39,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from dataclasses import dataclass
 
-from fastapi import Request, status
+from fastapi import Request, Response, status
 from redis.asyncio import Redis
 
 from app.errors import AppError
@@ -180,6 +181,15 @@ def is_authenticated(request: Request) -> bool:
 # ---------------------------------------------------------------------------
 
 
+@dataclass(slots=True)
+class RateLimitState:
+    """Snapshot of a caller's window usage, surfaced as ``X-RateLimit-*`` headers."""
+
+    limit: int
+    remaining: int
+    reset_seconds: int
+
+
 class RateLimiter:
     """Fixed-window Redis rate limiter.
 
@@ -202,14 +212,16 @@ class RateLimiter:
         client_id: str,
         limit: int,
         window_seconds: int,
-    ) -> None:
+    ) -> RateLimitState | None:
         """Increment the counter; raise :exc:`RateLimitError` when over limit.
 
-        Fail-open: any Redis error is logged at WARNING level and the request
-        is allowed through.
+        Returns the current :class:`RateLimitState` (for ``X-RateLimit-*``
+        headers) when the limiter is active, or ``None`` when disabled, without
+        a Redis client, or when Redis errors (fail-open: the request is allowed
+        through and a WARNING is logged).
         """
         if not self._enabled or self._redis is None:
-            return
+            return None
 
         window_slot = int(time.time()) // window_seconds
         key = f"rl:{name}:{client_id}:{window_slot}"
@@ -221,17 +233,19 @@ class RateLimiter:
                 # slot, preventing a brief gap where a burst could reset the
                 # counter prematurely.
                 await self._redis.expire(key, window_seconds * 2)
+            reset_seconds = max(1, window_seconds - (int(time.time()) % window_seconds))
             if count > limit:
-                retry_after = window_seconds - (int(time.time()) % window_seconds)
                 logger.warning(
                     "ratelimit.throttled",
                     extra={"bucket": name, "client_id": client_id, "limit": limit},
                 )
-                raise RateLimitError(retry_after=max(1, retry_after))
+                raise RateLimitError(retry_after=reset_seconds)
+            return RateLimitState(limit=limit, remaining=max(0, limit - count), reset_seconds=reset_seconds)
         except RateLimitError:
             raise
         except Exception:
             logger.warning("ratelimit.redis_error — failing open", exc_info=True)
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -283,11 +297,15 @@ class RateLimit:
         self.auth_limit = auth_limit if auth_limit is not None else anon_limit
         self.window_seconds = window_seconds
 
-    async def __call__(self, request: Request) -> None:
+    async def __call__(self, request: Request, response: Response) -> None:
         from app.config import get_settings
 
         settings = get_settings()
         limiter = RateLimiter(get_limiter(), enabled=settings.rate_limit_enabled)
         client_id = get_client_id(request)
         limit = self.auth_limit if is_authenticated(request) else self.anon_limit
-        await limiter.check(self.name, client_id, limit, self.window_seconds)
+        state = await limiter.check(self.name, client_id, limit, self.window_seconds)
+        if state is not None:
+            response.headers["X-RateLimit-Limit"] = str(state.limit)
+            response.headers["X-RateLimit-Remaining"] = str(state.remaining)
+            response.headers["X-RateLimit-Reset"] = str(state.reset_seconds)
