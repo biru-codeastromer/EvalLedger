@@ -17,6 +17,7 @@ export default function ContaminationPage() {
   const [reports, setReports] = useState<ContaminationReport[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
     if (!activeJobId) {
@@ -115,7 +116,15 @@ export default function ContaminationPage() {
     <div className="section-space">
       <div className="page-frame">
         <div className="relative mb-12 h-[320px] overflow-hidden rounded-sm border" style={{ borderColor: "var(--border)" }}>
-          <Image src="/images/04-microscope-slide.jpg" alt="Microscope slide accent" fill className="editorial-image" />
+          <Image
+            src="/images/04-microscope-slide.jpg"
+            alt="Microscope slide accent"
+            fill
+            priority
+            quality={72}
+            sizes="100vw"
+            className="editorial-image"
+          />
           <div className="absolute inset-0 bg-[rgba(245,243,238,0.62)]" />
           <div className="absolute inset-0 flex items-end px-8 py-8">
             <h1 className="display-lg max-w-3xl">Check your benchmark for contamination.</h1>
@@ -124,19 +133,47 @@ export default function ContaminationPage() {
         <div className="grid gap-10 md:grid-cols-[minmax(0,1fr)_320px]">
           <section>
             <div
-              className="flex min-h-[260px] flex-col items-center justify-center rounded-sm border-2 border-dashed p-8 text-center"
-              style={{ borderColor: "var(--border)" }}
+              className="flex min-h-[260px] flex-col items-center justify-center rounded-sm border-2 border-dashed p-8 text-center transition-colors"
+              style={{
+                borderColor: dragActive ? "var(--accent)" : "var(--border)",
+                background: dragActive ? "var(--surface)" : "transparent",
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragActive(false);
+                const dropped = event.dataTransfer.files?.[0] ?? null;
+                if (dropped) {
+                  setFile(dropped);
+                }
+              }}
             >
               <div className="mono mb-4">Upload artifact</div>
               <p className="max-w-md text-[16px] text-[var(--text-dim)]">
                 Drag a JSON, JSONL, CSV, or Parquet artifact here, or choose a file to run a public
                 contamination check.
               </p>
-              <input
-                type="file"
-                className="mt-6"
-                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-              />
+              <div className="mt-6 flex flex-col items-center gap-3">
+                <label className="btn-secondary cursor-pointer">
+                  Choose file
+                  <input
+                    type="file"
+                    accept=".json,.jsonl,.csv,.parquet"
+                    className="sr-only"
+                    onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <span className="ui-copy text-[14px] text-[var(--muted)]">
+                  {file ? file.name : "No file selected"}
+                </span>
+              </div>
             </div>
             <div className="mt-8">
               <div className="mono mb-4">Reference corpora</div>
@@ -176,7 +213,14 @@ export default function ContaminationPage() {
           </section>
           <aside className="space-y-6">
             <div className="relative h-[280px] overflow-hidden rounded-sm border" style={{ borderColor: "var(--border)" }}>
-              <Image src="/images/15-petri-dish.jpg" alt="Petri dish accent" fill className="editorial-image" />
+              <Image
+                src="/images/15-petri-dish.jpg"
+                alt="Petri dish accent"
+                fill
+                quality={72}
+                sizes="(min-width: 768px) 320px, 100vw"
+                className="editorial-image"
+              />
             </div>
             {reports.length > 0 ? <OverlapVisualizer reports={reports} /> : null}
           </aside>

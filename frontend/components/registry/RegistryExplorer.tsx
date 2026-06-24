@@ -32,8 +32,16 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
     <div className="page-frame section-space">
       <div className="mb-8 overflow-hidden rounded-sm border" style={{ borderColor: "var(--border)" }}>
         <div className="relative min-h-[320px] md:min-h-[360px]">
-          <Image src="/images/13-aerial-grid.jpg" alt="Registry hero banner" fill className="editorial-image" />
-          <div className="absolute inset-0 bg-[rgba(245,243,238,0.56)]" />
+          <Image
+            src="/images/13-aerial-grid.jpg"
+            alt="Registry hero banner"
+            fill
+            priority
+            sizes="100vw"
+            quality={72}
+            className="editorial-image"
+          />
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(245,243,238,0.94)_0%,rgba(245,243,238,0.9)_34%,rgba(245,243,238,0.6)_56%,rgba(245,243,238,0.66)_90%,rgba(245,243,238,0.4)_100%)]" />
           <div className="absolute inset-0 grid gap-8 px-8 py-8 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] md:items-end">
             <div className="self-end">
               <div className="mono mb-3">Registry</div>
@@ -50,7 +58,14 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
       <div className="grid gap-8 md:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="border-r pr-6" style={{ borderColor: "var(--border)" }}>
           <div className="relative mb-8 h-[220px] overflow-hidden rounded-sm border" style={{ borderColor: "var(--border)" }}>
-            <Image src="/images/03-card-catalog.jpg" alt="Card catalog" fill className="editorial-image" />
+            <Image
+              src="/images/03-card-catalog.jpg"
+              alt="Card catalog"
+              fill
+              sizes="240px"
+              quality={72}
+              className="editorial-image"
+            />
           </div>
           <div className="space-y-8">
             <div>
