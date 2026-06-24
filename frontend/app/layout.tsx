@@ -89,9 +89,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body
         className={`${anthropicSans.variable} ${anthropicSerif.variable} ${anthropicMono.variable} site-shell`}
       >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:border focus:bg-[var(--surface)] focus:px-4 focus:py-2 focus:text-[14px] focus:text-[var(--text)]"
+          style={{ borderColor: "var(--border)" }}
+        >
+          Skip to content
+        </a>
         <Providers>
           <Nav />
-          <main>{children}</main>
+          <main id="main-content">{children}</main>
           <Footer />
         </Providers>
       </body>

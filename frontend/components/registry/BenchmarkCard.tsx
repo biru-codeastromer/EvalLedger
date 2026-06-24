@@ -7,7 +7,7 @@ export function BenchmarkCard({ benchmark }: { benchmark: BenchmarkListItem }) {
   return (
     <Link
       href={`/registry/${benchmark.slug}`}
-      className="block border p-6 transition-colors duration-200 hover:border-[var(--text-dim)]"
+      className="card-hover block border p-6 transition-colors duration-200 hover:border-[var(--text-dim)]"
       style={{ borderColor: "var(--border)", background: "var(--bg)" }}
     >
       <div className="flex items-start justify-between gap-4">

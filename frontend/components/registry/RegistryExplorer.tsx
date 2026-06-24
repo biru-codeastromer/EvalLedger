@@ -5,6 +5,7 @@ import Image from "next/image";
 import { startTransition, useDeferredValue, useMemo } from "react";
 
 import { BenchmarkCard } from "@/components/registry/BenchmarkCard";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { getBenchmarks } from "@/lib/api";
 import { useRegistryStore } from "@/lib/useRegistryStore";
 
@@ -123,7 +124,23 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
         </aside>
         <div className="space-y-4">
           {isLoading ? (
-            <p className="text-[var(--text-dim)]">Loading the registry...</p>
+            <div role="status" aria-label="Loading benchmarks" className="space-y-4">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="border p-6"
+                  style={{ borderColor: "var(--border)", background: "var(--bg)" }}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <Skeleton className="h-3 w-32" />
+                    <Skeleton className="h-3 w-16" />
+                  </div>
+                  <Skeleton className="mt-5 h-7 w-3/4" />
+                  <Skeleton className="mt-3 h-4 w-full" />
+                  <Skeleton className="mt-2 h-4 w-5/6" />
+                </div>
+              ))}
+            </div>
           ) : isError ? (
             <p className="text-[var(--text-dim)]">
               Something went wrong loading the registry.

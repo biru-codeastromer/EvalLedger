@@ -11,6 +11,7 @@ import { AuthResponse } from "@/lib/types";
 export function Nav() {
   const [session, setSession] = useState<AuthResponse | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
     const sync = () => setSession(loadSession());
@@ -18,12 +19,24 @@ export function Nav() {
     return subscribeToSessionChange(sync);
   }, []);
 
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   const closeMenu = () => setMenuOpen(false);
 
   return (
     <header
       className="ui-copy sticky top-0 z-40 border-b bg-[var(--bg)]"
-      style={{ borderColor: "var(--border)" }}
+      style={{
+        borderColor: "var(--border)",
+        borderBottomWidth: scrolled ? "1.5px" : "1px",
+        boxShadow: scrolled ? "0 1px 12px rgba(0, 0, 0, 0.06)" : "none",
+        transition: "box-shadow 180ms ease-out, border-bottom-width 180ms ease-out"
+      }}
     >
       <div className="page-frame flex items-center justify-between gap-6 py-4">
         <Link href="/" className="flex items-center gap-3 font-[var(--font-display)] tracking-tight">
