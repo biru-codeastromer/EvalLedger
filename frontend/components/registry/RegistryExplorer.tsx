@@ -7,6 +7,7 @@ import { startTransition, useDeferredValue, useMemo } from "react";
 import { BenchmarkCard } from "@/components/registry/BenchmarkCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { getBenchmarks } from "@/lib/api";
+import { IMAGE_BLUR } from "@/lib/imageBlur";
 import { useRegistryStore } from "@/lib/useRegistryStore";
 
 const DOMAIN_OPTIONS = ["reasoning", "knowledge", "math", "code", "safety"];
@@ -39,6 +40,8 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
             priority
             sizes="100vw"
             quality={72}
+            placeholder="blur"
+            blurDataURL={IMAGE_BLUR["/images/13-aerial-grid.jpg"]}
             className="editorial-image"
           />
           <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(var(--scrim-rgb),0.94)_0%,rgba(var(--scrim-rgb),0.9)_34%,rgba(var(--scrim-rgb),0.6)_56%,rgba(var(--scrim-rgb),0.66)_90%,rgba(var(--scrim-rgb),0.4)_100%)]" />
@@ -64,6 +67,8 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
               fill
               sizes="240px"
               quality={72}
+              placeholder="blur"
+              blurDataURL={IMAGE_BLUR["/images/03-card-catalog.jpg"]}
               className="editorial-image"
             />
           </div>

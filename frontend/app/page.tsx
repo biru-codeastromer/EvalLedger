@@ -6,6 +6,7 @@ import { Reveal } from "@/components/ui/Reveal";
 import { StatCounter } from "@/components/ui/StatCounter";
 import { StatusPill } from "@/components/ui/StatusPill";
 import { getOverview, getRecent } from "@/lib/api";
+import { IMAGE_BLUR } from "@/lib/imageBlur";
 
 async function safeOverview() {
   try {
@@ -59,6 +60,8 @@ export default async function HomePage() {
                 priority
                 sizes="(max-width: 768px) 100vw, 360px"
                 quality={72}
+                placeholder="blur"
+                blurDataURL={IMAGE_BLUR["/images/02-ledger-book.jpg"]}
                 className="editorial-image"
               />
             </div>
@@ -76,6 +79,8 @@ export default async function HomePage() {
                 fill
                 sizes="80px"
                 quality={72}
+                placeholder="blur"
+                blurDataURL={IMAGE_BLUR["/images/11-tally-marks.jpg"]}
                 className="editorial-image"
               />
             </div>
@@ -108,6 +113,8 @@ export default async function HomePage() {
                   fill
                   sizes="(max-width: 768px) 100vw, 480px"
                   quality={72}
+                  placeholder="blur"
+                  blurDataURL={IMAGE_BLUR["/images/01-filing-cabinets.jpg"]}
                   className="editorial-image"
                 />
               </div>
@@ -127,6 +134,8 @@ export default async function HomePage() {
                 fill
                 sizes="(max-width: 768px) 100vw, 480px"
                 quality={72}
+                placeholder="blur"
+                blurDataURL={IMAGE_BLUR["/images/07-fingerprint.jpg"]}
                 className="editorial-image"
               />
             </div>
@@ -163,6 +172,8 @@ export default async function HomePage() {
                   fill
                   sizes="(max-width: 768px) 100vw, 480px"
                   quality={72}
+                  placeholder="blur"
+                  blurDataURL={IMAGE_BLUR["/images/05-stacked-papers.jpg"]}
                   className="editorial-image"
                 />
               </div>
@@ -190,6 +201,8 @@ export default async function HomePage() {
                   fill
                   sizes="(max-width: 768px) 100vw, 420px"
                   quality={72}
+                  placeholder="blur"
+                  blurDataURL={IMAGE_BLUR["/images/12-balance-scale.jpg"]}
                   className="editorial-image"
                 />
               </div>

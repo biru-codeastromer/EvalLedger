@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { ContaminationReport as ReportList } from "@/components/contamination/ContaminationReport";
 import { OverlapVisualizer } from "@/components/contamination/OverlapVisualizer";
 import { getCorpora, getJob, runAdHocCheck } from "@/lib/api";
+import { IMAGE_BLUR } from "@/lib/imageBlur";
 import { ContaminationReport } from "@/lib/types";
 
 export default function ContaminationPage() {
@@ -123,6 +124,8 @@ export default function ContaminationPage() {
             priority
             quality={72}
             sizes="100vw"
+            placeholder="blur"
+            blurDataURL={IMAGE_BLUR["/images/04-microscope-slide.jpg"]}
             className="editorial-image"
           />
           <div className="absolute inset-0 bg-[rgba(var(--scrim-rgb),0.62)]" />
@@ -219,6 +222,8 @@ export default function ContaminationPage() {
                 fill
                 quality={72}
                 sizes="(min-width: 768px) 320px, 100vw"
+                placeholder="blur"
+                blurDataURL={IMAGE_BLUR["/images/15-petri-dish.jpg"]}
                 className="editorial-image"
               />
             </div>
