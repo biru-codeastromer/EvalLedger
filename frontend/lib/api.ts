@@ -219,6 +219,23 @@ export async function revokeApiKey(id: string): Promise<void> {
   }
 }
 
+export async function exportMyData(): Promise<unknown> {
+  const response = await fetch(`${getBaseUrl(true)}/auth/me/export`, {
+    headers: buildAuthHeaders()
+  });
+  return parseResponse<unknown>(response);
+}
+
+export async function deleteMyAccount(): Promise<void> {
+  const response = await fetch(`${getBaseUrl(true)}/auth/me`, {
+    method: "DELETE",
+    headers: buildAuthHeaders()
+  });
+  if (!response.ok) {
+    await parseResponse<void>(response);
+  }
+}
+
 export async function getReviewQueue(status: "pending" | "verified" | "all" = "pending"): Promise<ReviewQueueItem[]> {
   return fetchJSON<ReviewQueueItem[]>(`/admin/review-queue?status=${status}`, undefined, true, true);
 }

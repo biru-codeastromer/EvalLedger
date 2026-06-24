@@ -6,7 +6,14 @@ import { useMemo, useState } from "react";
 
 import { ActivityFeed } from "@/components/ui/ActivityFeed";
 import { CodeBlock } from "@/components/ui/CodeBlock";
-import { APIError, createApiKey, getCurrentProfile, revokeApiKey } from "@/lib/api";
+import {
+  APIError,
+  createApiKey,
+  deleteMyAccount,
+  exportMyData,
+  getCurrentProfile,
+  revokeApiKey
+} from "@/lib/api";
 import { clearSession } from "@/lib/session";
 
 export default function AccountPage() {
@@ -32,6 +39,29 @@ export default function AccountPage() {
     mutationFn: revokeApiKey,
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["account"] });
+    }
+  });
+
+  const exportMutation = useMutation({
+    mutationFn: exportMyData,
+    onSuccess: (data) => {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "evalledger-export.json";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteMyAccount,
+    onSuccess: () => {
+      clearSession();
+      window.location.href = "/";
     }
   });
 
@@ -183,6 +213,54 @@ export default function AccountPage() {
           events={recent_activity}
           emptyMessage="No audit events have been recorded for this account yet."
         />
+      </section>
+
+      <section className="space-y-4 rounded-sm border p-6" style={{ borderColor: "var(--border)" }}>
+        <div className="mono">Data &amp; privacy</div>
+        <p className="max-w-2xl text-[15px] leading-7 text-[var(--text-dim)]">
+          Download a machine-readable copy of everything attached to your account, or permanently
+          delete it. Deletion anonymizes your account and cannot be undone.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={exportMutation.isPending}
+            onClick={() => exportMutation.mutate()}
+          >
+            {exportMutation.isPending ? "Preparing export…" : "Export my data"}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={deleteMutation.isPending}
+            onClick={() => {
+              const confirmed = window.confirm(
+                "Delete your account? This is irreversible. Your account will be anonymized and " +
+                  "you will lose access to your API keys and ownership records."
+              );
+              if (confirmed) {
+                deleteMutation.mutate();
+              }
+            }}
+          >
+            {deleteMutation.isPending ? "Deleting…" : "Delete my account"}
+          </button>
+        </div>
+        {exportMutation.error ? (
+          <p className="text-[14px] text-[var(--text-dim)]">
+            {exportMutation.error instanceof APIError
+              ? exportMutation.error.message
+              : "Unable to export your data. Please try again."}
+          </p>
+        ) : null}
+        {deleteMutation.error ? (
+          <p className="text-[14px] text-[var(--text-dim)]">
+            {deleteMutation.error instanceof APIError
+              ? deleteMutation.error.message
+              : "Unable to delete your account. Please try again."}
+          </p>
+        ) : null}
       </section>
     </div>
   );
