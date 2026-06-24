@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     # Truncation length for example/corpus text stored in a flagged record, to
     # bound JSONB row size and avoid echoing large corpus content into the API.
     contamination_max_example_chars: int = 2_000
+    # Celery time limits (seconds) for a contamination job: a soft limit raises
+    # SoftTimeLimitExceeded (handled -> mark version 'error'); the hard limit
+    # kills the worker process so a runaway job cannot hold a slot forever.
+    contamination_task_soft_time_limit: int = 600
+    contamination_task_time_limit: int = 660
 
     @model_validator(mode="after")
     def _validate_s3_settings(self) -> Settings:

@@ -60,6 +60,7 @@ module = [
   "botocore.config",
   "botocore.exceptions",
   "celery",
+  "celery.exceptions",
   "celery.result",
   "datasketch",
   "bcrypt",

@@ -14,6 +14,7 @@ from uuid import UUID
 import pyarrow.parquet as pq
 from datasketch import MinHashLSH
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -159,21 +160,32 @@ class ContaminationEngine:
         num_flagged: int,
         started_at: datetime,
         completed_at: datetime,
-    ) -> ContaminationReport:
-        report = ContaminationReport(
-            version_id=version.id,
-            corpus_id=corpus.id,
-            status=status,
-            overlap_score=overlap_score,
-            num_flagged_examples=num_flagged,
-            flagged_examples=flagged_examples,
-            minhash_threshold=self.threshold,
-            job_started_at=started_at,
-            job_completed_at=completed_at,
-        )
-        self.session.add(report)
-        await self.session.flush()
-        return report
+    ) -> UUID:
+        """Idempotently upsert the report keyed on (version_id, corpus_id).
+
+        Celery delivers at least once, so a redelivered or re-run job must not
+        accumulate duplicate rows — ON CONFLICT updates the existing report in
+        place. Returns the report id.
+        """
+        values: dict[str, Any] = {
+            "version_id": version.id,
+            "corpus_id": corpus.id,
+            "status": status,
+            "overlap_score": overlap_score,
+            "num_flagged_examples": num_flagged,
+            "flagged_examples": flagged_examples,
+            "minhash_threshold": self.threshold,
+            "job_started_at": started_at,
+            "job_completed_at": completed_at,
+            "error_message": None,
+        }
+        insert_stmt = pg_insert(ContaminationReport).values(**values)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["version_id", "corpus_id"],
+            set_={key: insert_stmt.excluded[key] for key in values if key not in ("version_id", "corpus_id")},
+        ).returning(ContaminationReport.id)
+        result = await self.session.execute(upsert_stmt)
+        return result.scalar_one()
 
     async def run_detection(
         self,
@@ -255,7 +267,7 @@ class ContaminationEngine:
                 "job_completed_at": completed_at.isoformat(),
             }
             if version is not None:
-                report = await self._store_report(
+                report_id = await self._store_report(
                     version=version,
                     corpus=bundle.corpus,
                     status=status,
@@ -265,7 +277,7 @@ class ContaminationEngine:
                     started_at=started_at,
                     completed_at=completed_at,
                 )
-                report_payload["report_id"] = str(report.id)
+                report_payload["report_id"] = str(report_id)
             results.append(report_payload)
 
         if version is not None:

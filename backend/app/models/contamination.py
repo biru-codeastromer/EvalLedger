@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -33,6 +33,10 @@ class ReferenceCorpus(Base):
 
 class ContaminationReport(Base):
     __tablename__ = "contamination_reports"
+    # One report per (version, corpus). version_id is nullable for ad-hoc checks;
+    # Postgres treats NULLs as distinct so ad-hoc rows remain unconstrained, while
+    # re-runs for a real version upsert in place instead of accumulating duplicates.
+    __table_args__ = (UniqueConstraint("version_id", "corpus_id", name="uq_contamination_version_corpus"),)
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     version_id: Mapped[UUID | None] = mapped_column(
