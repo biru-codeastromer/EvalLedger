@@ -171,13 +171,18 @@ def _content_length_exceeds(request: Request, limit: int) -> bool:
         return False
 
 
-def _apply_http_caching(request: Request, response: Response) -> Response:
-    """Add ETag / Cache-Control to safe GETs and short-circuit 304 Not Modified.
+async def _apply_http_caching(request: Request, response: Response) -> Response:
+    """Add ETag / Cache-Control to safe JSON GETs and short-circuit 304.
 
-    Authenticated requests (which carry per-user data) get ``private, no-store``
-    and no shared ETag. Anonymous GETs of public registry data get a weak ETag
-    plus ``public, max-age`` so CDNs/browsers can revalidate cheaply. Health,
-    metrics and docs paths are exempt entirely.
+    Authenticated requests (per-user data) get ``private, no-store`` and no
+    shared ETag. Anonymous GETs of public JSON get a weak ETag plus
+    ``public, max-age`` so CDNs/browsers can revalidate cheaply. Health, metrics
+    and docs paths are exempt, and only ``application/json`` responses are
+    handled — binary artifact downloads are never buffered.
+
+    Downstream of BaseHTTPMiddleware the response is a streaming wrapper without
+    ``.body``, so the body is buffered (and the response rebuilt) to compute a
+    stable ETag.
     """
     if request.method != "GET" or response.status_code != 200:
         return response
@@ -186,9 +191,24 @@ def _apply_http_caching(request: Request, response: Response) -> Response:
     if request.headers.get("authorization") or request.headers.get("x-api-key"):
         response.headers.setdefault("Cache-Control", "private, no-store")
         return response
+    if not response.headers.get("content-type", "").startswith("application/json"):
+        return response
+
     body = getattr(response, "body", None)
     if not isinstance(body, bytes | bytearray):
-        return response
+        body_iterator = getattr(response, "body_iterator", None)
+        if body_iterator is None:
+            return response
+        buffered = b""
+        async for chunk in body_iterator:
+            buffered += chunk
+        body = buffered
+        rebuilt = Response(content=body, status_code=response.status_code)
+        for header_key, header_value in response.headers.items():
+            if header_key.lower() != "content-length":
+                rebuilt.headers[header_key] = header_value
+        response = rebuilt
+
     etag = 'W/"' + hashlib.sha256(bytes(body)).hexdigest()[:32] + '"'
     response.headers["ETag"] = etag
     response.headers.setdefault("Cache-Control", f"public, max-age={settings.http_cache_max_age}")
@@ -310,7 +330,7 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
             "client_ip": client_ip,
         },
     )
-    response = _apply_http_caching(request, response)
+    response = await _apply_http_caching(request, response)
     response.headers["X-Request-ID"] = request_id
     return response
 

@@ -78,6 +78,9 @@ disallow_untyped_decorators = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "integration: end-to-end tests against a real Postgres/Redis (skipped without DATABASE_URL)",
+]
 
 [build-system]
 requires = ["hatchling"]
