@@ -4,17 +4,30 @@ import asyncio
 from typing import Any
 from uuid import UUID
 
+from botocore.exceptions import ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError
 from celery import Celery
 from celery.exceptions import SoftTimeLimitExceeded
 
 from app.config import get_settings
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
 from app.logging import logger
 from app.models.version import BenchmarkVersion
 from app.services.contamination_engine import ContaminationEngine
 from app.services.storage import StorageService
 
 settings = get_settings()
+
+# Errors worth retrying: transient network/broker/storage blips. NOT OSError —
+# pyarrow raises bare OSError for a corrupt artifact, which is a permanent,
+# content-determined failure that must fall through to the 'mark error' path.
+TRANSIENT_ERRORS = (
+    ConnectionError,
+    TimeoutError,
+    EndpointConnectionError,
+    ConnectTimeoutError,
+    ReadTimeoutError,
+)
+
 celery_app = Celery(
     "evalledger",
     broker=settings.celery_broker_url,
@@ -38,30 +51,39 @@ async def _run_job(
     corpus_ids: list[str],
     version_id: str | None,
 ) -> dict[str, Any]:
-    async with SessionLocal() as session:
-        engine = ContaminationEngine(session, StorageService.from_settings(settings))
-        return await engine.run_detection(
-            artifact_name=artifact_name,
-            artifact_location=artifact_location,
-            corpus_ids=corpus_ids,
-            version_id=version_id,
-        )
+    try:
+        async with SessionLocal() as session:
+            detector = ContaminationEngine(session, StorageService.from_settings(settings))
+            return await detector.run_detection(
+                artifact_name=artifact_name,
+                artifact_location=artifact_location,
+                corpus_ids=corpus_ids,
+                version_id=version_id,
+            )
+    finally:
+        # The worker runs each job in its own asyncio.run event loop; dispose the
+        # pool so the next loop never reuses an asyncpg connection bound to a now
+        # closed loop ("got Future attached to a different loop").
+        await engine.dispose()
 
 
 async def _mark_version_error(version_id: str) -> None:
     """Best-effort: record that contamination checking failed for a version."""
-    async with SessionLocal() as session:
-        version = await session.get(BenchmarkVersion, UUID(version_id))
-        if version is not None:
-            version.contamination_status = "error"
-            await session.commit()
+    try:
+        async with SessionLocal() as session:
+            version = await session.get(BenchmarkVersion, UUID(version_id))
+            if version is not None:
+                version.contamination_status = "error"
+                await session.commit()
+    finally:
+        await engine.dispose()
 
 
 @celery_app.task(
     bind=True,
     name="contamination.check",
     max_retries=3,
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
+    autoretry_for=TRANSIENT_ERRORS,
     retry_backoff=True,
     retry_backoff_max=120,
     retry_jitter=True,
@@ -75,8 +97,8 @@ def run_contamination_check(
 ) -> dict[str, Any]:
     try:
         return asyncio.run(_run_job(artifact_name, artifact_location, corpus_ids, version_id))
-    except (ConnectionError, TimeoutError, OSError):
-        # Transient infrastructure errors — let autoretry_for handle the backoff.
+    except TRANSIENT_ERRORS:
+        # Transient — re-raise untouched so autoretry_for backs off and retries.
         raise
     except SoftTimeLimitExceeded:
         logger.error("contamination.job.timeout", extra={"version_id": version_id})
@@ -84,7 +106,7 @@ def run_contamination_check(
             asyncio.run(_mark_version_error(version_id))
         raise
     except Exception:
-        # Permanent failure (e.g. a malformed artifact): surface an 'error' status
+        # Permanent failure (e.g. a corrupt artifact): surface an 'error' status
         # on the version instead of leaving it stuck on 'pending' forever.
         logger.exception("contamination.job.failed", extra={"version_id": version_id})
         if version_id is not None:

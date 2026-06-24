@@ -81,7 +81,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
     expose_headers=["X-Request-ID"],
 )
@@ -100,28 +100,49 @@ def _client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for", "")
     hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
     if hops:
-        index = max(-len(hops), -settings.trusted_proxy_count)
+        # Mirror app.ratelimit._client_ip exactly so the audit log and the
+        # rate-limit bucket attribute a caller to the same IP. Clamp to >=1
+        # trusted proxy and index from the right.
+        proxy_count = max(1, settings.trusted_proxy_count)
+        index = max(0, len(hops) - proxy_count)
         return hops[index]
     return request.client.host if request.client else "unknown"
+
+
+def _content_length_exceeds(request: Request, limit: int) -> bool:
+    """Return True only if a well-formed Content-Length header exceeds *limit*.
+
+    A missing or malformed header is treated as 'not over the limit' rather than
+    raising — uvicorn rejects invalid Content-Length at the protocol layer, and
+    the per-endpoint upload validators enforce real size limits downstream.
+    """
+    raw = request.headers.get("content-length")
+    if raw is None:
+        return False
+    try:
+        return int(raw) > limit
+    except ValueError:
+        return False
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     request_id = request.headers.get("x-request-id") or uuid4().hex
     request.state.request_id = request_id
-    # Reject oversized payloads up front, before the body is buffered/parsed.
-    content_length = request.headers.get("content-length")
-    if content_length is not None and int(content_length) > settings.max_request_body_bytes:
-        return error_response(
-            "payload_too_large",
-            "Request body too large",
-            status_code=413,
-            details={"request_id": request_id, "limit_bytes": settings.max_request_body_bytes},
-        )
     client_ip = _client_ip(request)
     started_at = perf_counter()
     try:
-        response = await call_next(request)
+        if _content_length_exceeds(request, settings.max_request_body_bytes):
+            # Reject oversized payloads up front; still flows through the shared
+            # logging + X-Request-ID finalisation below.
+            response: Response = error_response(
+                "payload_too_large",
+                "Request body too large",
+                status_code=413,
+                details={"request_id": request_id, "limit_bytes": settings.max_request_body_bytes},
+            )
+        else:
+            response = await call_next(request)
     except Exception:
         duration_ms = round((perf_counter() - started_at) * 1000, 2)
         logger.info(

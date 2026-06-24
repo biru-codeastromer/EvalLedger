@@ -210,7 +210,16 @@ async def create_version(
         await session.commit()
     except Exception:
         # Roll back the orphaned artifact so storage does not drift from the DB.
-        await storage_service.delete(storage_reference)
+        # Guard the cleanup so a storage error can't mask the original failure
+        # (e.g. a 409 version race or a 400 metadata error).
+        try:
+            await storage_service.delete(storage_reference)
+        except Exception:
+            _version_logger.warning(
+                "version.orphan_cleanup_failed",
+                extra={"benchmark_slug": benchmark.slug, "storage_reference": storage_reference},
+                exc_info=True,
+            )
         raise
     await session.refresh(version_record)
     await session.refresh(benchmark)

@@ -22,7 +22,7 @@ from app.errors import AppError
 from app.logging import logger
 from app.models.contamination import ContaminationReport, ReferenceCorpus
 from app.models.version import BenchmarkVersion
-from app.services.corpus_index import empty_corpus_index, load_corpus_index
+from app.services.corpus_index import LSH_RECALL_THRESHOLD, empty_corpus_index, load_corpus_index
 from app.services.storage import StorageService
 from app.utils.minhash import build_minhash, jaccard_shingles
 
@@ -53,6 +53,10 @@ class ContaminationEngine:
         self.max_examples = settings.contamination_max_examples
         self.max_flagged_examples = settings.contamination_max_flagged_examples
         self.max_example_chars = settings.contamination_max_example_chars
+        # Build the LSH candidate filter at no higher than the query threshold,
+        # so a configured threshold below the recall floor can't prune true
+        # matches before the exact recheck ever runs.
+        self.recall_threshold = min(LSH_RECALL_THRESHOLD, threshold)
 
     def compute_minhash(self, text: str) -> Any:
         return build_minhash(text, num_perm=self.num_perm, shingle_size=self.shingle_size)
@@ -129,7 +133,7 @@ class ContaminationEngine:
 
     async def _load_bundle(self, corpus: ReferenceCorpus) -> LSHIndexBundle:
         if corpus.minhash_index_path is None:
-            index = empty_corpus_index(num_perm=self.num_perm)
+            index = empty_corpus_index(num_perm=self.num_perm, recall_threshold=self.recall_threshold)
             return LSHIndexBundle(corpus=corpus, lsh=index.lsh, entries=index.entries)
         raw_bytes = await self.storage_service.read_bytes(corpus.minhash_index_path)
         # Deserialisation rebuilds the LSH from stored hashvalues — no pickle, so
@@ -137,7 +141,7 @@ class ContaminationEngine:
         # rebuilt at a recall floor; the configurable threshold is applied below
         # in the exact shingle-Jaccard recheck instead.
         try:
-            index = await asyncio.to_thread(load_corpus_index, raw_bytes)
+            index = await asyncio.to_thread(load_corpus_index, raw_bytes, recall_threshold=self.recall_threshold)
         except ValueError as exc:
             raise AppError("invalid_corpus_index", "Reference corpus index is invalid", status_code=500) from exc
         return LSHIndexBundle(corpus=corpus, lsh=index.lsh, entries=index.entries)
