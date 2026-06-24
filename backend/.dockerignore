@@ -1,0 +1,22 @@
+# Virtualenv (rebuilt inside the image)
+.venv
+
+# Local persisted artifacts
+storage
+
+# Python caches / build artifacts
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+
+# Tooling caches
+.ruff_cache
+.mypy_cache
+.pytest_cache
+
+# VCS
+.git
+
+# Secrets / local env
+.env

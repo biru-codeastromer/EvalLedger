@@ -1,13 +1,16 @@
-name: CI
+name: Security
 
 on:
   push:
     branches:
       - main
   pull_request:
+  schedule:
+    # Weekly scan, Mondays at 06:00 UTC
+    - cron: "0 6 * * 1"
 
 jobs:
-  backend:
+  backend-audit:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -17,12 +20,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv sync --frozen --group dev
-      - run: uv run ruff check .
-      - run: uv run mypy app
-      - run: uv run pytest --cov=app --cov-report=term-missing
+      - name: pip-audit (backend)
+        continue-on-error: true
+        run: uvx pip-audit
 
-  cli:
+  cli-audit:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -32,12 +34,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.11"
-      - run: uv sync --frozen --group dev
-      - run: uv run ruff check .
-      - run: uv run mypy evalledger
-      - run: uv run pytest
+      - name: pip-audit (cli)
+        continue-on-error: true
+        run: uvx pip-audit
 
-  frontend:
+  frontend-audit:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -54,9 +55,19 @@ jobs:
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-      - run: npx playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - name: pnpm audit (frontend)
+        continue-on-error: true
+        run: pnpm audit --audit-level=high
+
+  filesystem-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true

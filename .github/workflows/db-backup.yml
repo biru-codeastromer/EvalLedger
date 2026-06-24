@@ -1,0 +1,82 @@
+name: Scheduled DB Backup
+
+# Addresses "backups are manual": runs an offsite Postgres backup on a daily
+# schedule (and on demand). The workflow is a harmless no-op until the repo
+# owner configures the BACKUP_* / AWS_* secrets, so it is safe to merge as-is.
+
+on:
+  schedule:
+    # Daily at 03:17 UTC (off the top of the hour to avoid scheduler congestion).
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    env:
+      # Map secrets to env. Empty when unset; the guard steps below treat an
+      # empty value as "not configured" and skip without failing.
+      DB_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      BACKUP_S3_BUCKET: ${{ secrets.BACKUP_S3_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+      AWS_ENDPOINT_URL: ${{ secrets.AWS_ENDPOINT_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+
+      - name: Check backup configuration
+        id: guard
+        run: |
+          if [ -z "${DB_URL}" ]; then
+            echo "::notice::BACKUP_DATABASE_URL not set; skipping backup (configure the BACKUP_* secrets to enable)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install postgresql-client
+        if: steps.guard.outputs.configured == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Create database dump
+        if: steps.guard.outputs.configured == 'true'
+        id: dump
+        working-directory: backend
+        env:
+          # The db_backup script reads DATABASE_URL (falls back to
+          # SYNC_DATABASE_URL). Feed it the offsite backup DSN.
+          DATABASE_URL: ${{ env.DB_URL }}
+        run: |
+          mkdir -p ./_backup
+          STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+          OUTFILE="./_backup/evalledger-${STAMP}.dump"
+          uv run python -m app.scripts.db_backup --format custom --output "${OUTFILE}"
+          echo "outfile=${OUTFILE}" >> "$GITHUB_OUTPUT"
+          echo "filename=evalledger-${STAMP}.dump" >> "$GITHUB_OUTPUT"
+
+      - name: Upload backup to S3/R2
+        if: steps.guard.outputs.configured == 'true'
+        working-directory: backend
+        run: |
+          if [ -z "${BACKUP_S3_BUCKET}" ] || [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
+            echo "::notice::BACKUP_S3_BUCKET / AWS credentials not set; dump created but not uploaded offsite."
+            exit 0
+          fi
+          OUTFILE="${{ steps.dump.outputs.outfile }}"
+          FILENAME="${{ steps.dump.outputs.filename }}"
+          DEST="s3://${BACKUP_S3_BUCKET}/evalledger/${FILENAME}"
+          # AWS_ENDPOINT_URL is optional (used for non-AWS S3-compatible stores
+          # like Cloudflare R2). Only pass --endpoint-url when it is set.
+          if [ -n "${AWS_ENDPOINT_URL}" ]; then
+            aws --endpoint-url "${AWS_ENDPOINT_URL}" s3 cp "${OUTFILE}" "${DEST}"
+          else
+            aws s3 cp "${OUTFILE}" "${DEST}"
+          fi
+          echo "::notice::Backup uploaded to ${DEST}"

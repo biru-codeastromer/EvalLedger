@@ -16,6 +16,10 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   redis:
     image: redis:7
@@ -28,6 +32,10 @@ services:
       retries: 5
     ports:
       - "6379:6379"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   minio:
     image: minio/minio:latest
@@ -35,8 +43,8 @@ services:
     command: server /data --console-address ":9001"
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: evalledger
-      MINIO_ROOT_PASSWORD: evalledgersecret
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-evalledger}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-evalledgersecret}
     healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 15s
@@ -47,6 +55,10 @@ services:
       - "9001:9001"
     volumes:
       - minio-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   api:
     build:
@@ -59,7 +71,7 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     environment:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://evalledger:evalledger@postgres:5432/evalledger
@@ -67,21 +79,32 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      JWT_SECRET_KEY: evalledger-dev-secret
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-evalledger-dev-secret}
       STORAGE_BACKEND: s3
       STORAGE_BUCKET: evalledger-artifacts
       STORAGE_S3_ENDPOINT_URL: http://minio:9000
-      STORAGE_S3_ACCESS_KEY_ID: evalledger
-      STORAGE_S3_SECRET_ACCESS_KEY: evalledgersecret
+      STORAGE_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-evalledger}
+      STORAGE_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-evalledgersecret}
       STORAGE_S3_REGION: us-east-1
       STORAGE_S3_PRESIGN_ENDPOINT: http://localhost:9000
       CORS_ORIGINS: '["http://localhost:3000"]'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
     ports:
       - "8000:8000"
     volumes:
       - ./backend:/app
       - backend-storage:/app/storage
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
 
   worker:
     build:
@@ -94,7 +117,7 @@ services:
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
     environment:
       APP_ENV: development
       DATABASE_URL: postgresql+asyncpg://evalledger:evalledger@postgres:5432/evalledger
@@ -102,18 +125,23 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      JWT_SECRET_KEY: evalledger-dev-secret
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-evalledger-dev-secret}
       STORAGE_BACKEND: s3
       STORAGE_BUCKET: evalledger-artifacts
       STORAGE_S3_ENDPOINT_URL: http://minio:9000
-      STORAGE_S3_ACCESS_KEY_ID: evalledger
-      STORAGE_S3_SECRET_ACCESS_KEY: evalledgersecret
+      STORAGE_S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-evalledger}
+      STORAGE_S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-evalledgersecret}
       STORAGE_S3_REGION: us-east-1
       STORAGE_S3_PRESIGN_ENDPOINT: http://localhost:9000
     volumes:
       - ./backend:/app
       - backend-storage:/app/storage
     command: uv run celery -A app.tasks.contamination_tasks.celery_app worker --loglevel=info
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
 
   frontend:
     image: node:20-bookworm-slim
@@ -121,7 +149,7 @@ services:
     working_dir: /app
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000
       API_INTERNAL_URL: http://api:8000
@@ -131,6 +159,10 @@ services:
     volumes:
       - ./frontend:/app
     command: sh -c "corepack enable && pnpm install && pnpm dev --hostname 0.0.0.0 --port 3000"
+    deploy:
+      resources:
+        limits:
+          memory: 1g
 
 volumes:
   postgres-data:

@@ -89,3 +89,55 @@ An incident is not closed until:
 2. Data correctness is verified for affected records.
 3. Monitoring shows recovery, not just a single successful retry.
 4. A short postmortem note exists with root cause, fix, and follow-up work.
+
+## SLOs and on-call
+
+These are the draft service-level objectives and on-call policy. Like the rest of this runbook, they are implementation-ready but should be confirmed against the final company policy before launch. They define what "healthy" means in measurable terms, so the severity levels and exit criteria above can be judged against numbers rather than intuition.
+
+SLOs are scoped to the current single-region, single-replica deployment (see [disaster-recovery.md](./disaster-recovery.md) → "Blast radius"). They deliberately exclude Render free-tier cold starts, which are a platform wake-up cost, not an application regression — see [performance.md](./performance.md) → "Important limitation: Render free-tier cold starts". Latency targets are for the **hot path** (post-warmup); measure them with the load-test harness in performance.md.
+
+### Service-level objectives
+
+Two user-facing paths carry an explicit SLO:
+
+- **Public read path** — anonymous browsing and provenance inspection: `/search`, `/benchmarks`, `/benchmarks/{slug}`, `/benchmarks/{slug}/versions`, `/benchmarks/{slug}/{version}`, `/stats/overview`, `/stats/recent`.
+- **Submission path** — authenticated writes that create or update records: benchmark and version creation, and artifact upload.
+
+| Path | Availability (30-day) | p95 latency (hot) | p99 latency (hot) | Error budget (30-day) |
+|---|---|---|---|---|
+| Public read path | 99.5% | 400 ms | 800 ms | ~3h 39m of downtime |
+| Submission path | 99.0% | 1200 ms | 2500 ms | ~7h 18m of downtime |
+
+Notes:
+
+- **Availability** is the share of non-`5xx`, non-timeout responses on the path. A successful `4xx` (e.g. validation rejection, `401`) counts as available — it is correct behaviour, not an outage.
+- **Latency** is the server-side `duration_ms` field (see "Key structured fields" above), excluding cold-start requests. The submission path is allowed a looser budget because it performs writes, validation, and storage I/O.
+- **Error budget** is the inverse of the availability target. When the budget for a 30-day window is exhausted, freeze non-essential deploys (consistent with "First 15 minutes") and prioritise reliability work until the budget recovers.
+
+### Alerting plan
+
+Alerts map to the severity levels at the top of this runbook. Tune thresholds against the baselines captured in performance.md.
+
+| Signal | Condition | Severity | Notify |
+|---|---|---|---|
+| Health-endpoint failure (liveness) | `GET /health/live` non-200 or unreachable for 2 consecutive minutes | `SEV-1` | Page on-call immediately |
+| Health-endpoint failure (readiness) | `GET /health` returns 503 (a dependency check is false) for 5 consecutive minutes | `SEV-2` | Page on-call |
+| Dependency-down log signal | `health.database_failed`, `health.redis_failed`, or `health.storage_failed` recurring | `SEV-2` | Page on-call |
+| Error rate | `5xx` rate on any SLO path exceeds 2% over a 5-minute window | `SEV-2` | Page on-call |
+| Error-budget burn | 30-day error budget for a path projected to exhaust early (fast burn) | `SEV-2`/`SEV-3` | Notify on-call channel |
+| Latency (public read) | p95 `duration_ms` > 400 ms (or p99 > 800 ms) over 10 minutes, excluding cold starts | `SEV-3` | Notify on-call channel |
+| Latency (submission) | p95 `duration_ms` > 1200 ms (or p99 > 2500 ms) over 10 minutes | `SEV-3` | Notify on-call channel |
+| Auth/abuse anomaly | Sustained spike in `auth.api_key_invalid` / `auth.invalid_token` / `ratelimit.throttled` | `SEV-3` | Notify on-call channel |
+
+The readiness endpoint is the primary dependency signal: `/health` returns 503 when Postgres, Redis, or storage is unhealthy, so alerting on it covers most dependency outages without a separate probe per data store.
+
+### On-call and escalation policy (stub)
+
+This is a stub to be finalised with the on-call rotation before launch.
+
+- **Rotation:** one primary on-call engineer at a time, with a named secondary as backup. Define the rotation length (e.g. weekly) and handoff time when the rotation is staffed.
+- **Acknowledgement targets:** `SEV-1` acknowledged within 15 minutes, `SEV-2` within 30 minutes, `SEV-3` next business day. These mirror the communication cadence above.
+- **Escalation path:** primary on-call → secondary on-call → engineering lead. Escalate to the next tier if a `SEV-1` is unacknowledged after 15 minutes or unmitigated after 30 minutes.
+- **First action on page:** follow "First 15 minutes" and "System triage order" above — assign an owner, record impact, and check `/health/live` and `/health`.
+- **Disaster escalation:** if triage points to lost or corrupted data, or a regional/data-store outage, escalate to the DR procedure in [disaster-recovery.md](./disaster-recovery.md).
+- **Postmortem ownership:** the incident owner produces the postmortem note required by the exit criteria above; SLO and error-budget impact should be recorded in it.
