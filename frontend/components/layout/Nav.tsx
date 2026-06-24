@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { BrandMark } from "@/components/layout/BrandMark";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { loadSession, subscribeToSessionChange } from "@/lib/session";
 import { AuthResponse } from "@/lib/types";
 
@@ -53,6 +54,7 @@ export function Nav() {
           </a>
         </nav>
         <div className="flex items-center gap-3">
+          <ThemeToggle />
           <Link
             href={(session ? "/account" : "/login") as Route}
             className="text-[14px] text-[var(--text-dim)]"

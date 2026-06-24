@@ -249,8 +249,14 @@ function ReviewContextPanel({ slug, context, isLoading, error }: ReviewContextPa
 
   if (isLoading) {
     return (
-      <div className="rounded-sm border border-[var(--border)] px-5 py-8 text-[14px] text-[var(--text-dim)]">
-        Loading reviewer context…
+      <div
+        role="status"
+        aria-label="Loading reviewer context"
+        className="space-y-3 rounded-sm border border-[var(--border)] px-5 py-8"
+      >
+        <Skeleton className="h-6 w-56" />
+        <Skeleton className="h-3 w-full max-w-xl" />
+        <Skeleton className="h-3 w-3/4 max-w-md" />
       </div>
     );
   }
@@ -690,7 +696,11 @@ export default function ReviewPage() {
       <section className="space-y-4">
         <div className="mono">Administrative activity</div>
         {auditQuery.isLoading ? (
-          <p className="text-[14px] text-[var(--text-dim)]">Loading activity…</p>
+          <div role="status" aria-label="Loading activity" className="space-y-3">
+            <Skeleton className="h-3 w-full max-w-2xl" />
+            <Skeleton className="h-3 w-5/6 max-w-xl" />
+            <Skeleton className="h-3 w-2/3 max-w-md" />
+          </div>
         ) : (
           <ActivityFeed
             events={auditQuery.data ?? []}

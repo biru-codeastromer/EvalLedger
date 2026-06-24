@@ -125,7 +125,7 @@ export default function ContaminationPage() {
             sizes="100vw"
             className="editorial-image"
           />
-          <div className="absolute inset-0 bg-[rgba(245,243,238,0.62)]" />
+          <div className="absolute inset-0 bg-[rgba(var(--scrim-rgb),0.62)]" />
           <div className="absolute inset-0 flex items-end px-8 py-8">
             <h1 className="display-lg max-w-3xl">Check your benchmark for contamination.</h1>
           </div>

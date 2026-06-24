@@ -41,7 +41,7 @@ export function RegistryExplorer({ initialQuery = "" }: { initialQuery?: string 
             quality={72}
             className="editorial-image"
           />
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(245,243,238,0.94)_0%,rgba(245,243,238,0.9)_34%,rgba(245,243,238,0.6)_56%,rgba(245,243,238,0.66)_90%,rgba(245,243,238,0.4)_100%)]" />
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(var(--scrim-rgb),0.94)_0%,rgba(var(--scrim-rgb),0.9)_34%,rgba(var(--scrim-rgb),0.6)_56%,rgba(var(--scrim-rgb),0.66)_90%,rgba(var(--scrim-rgb),0.4)_100%)]" />
           <div className="absolute inset-0 grid gap-8 px-8 py-8 md:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] md:items-end">
             <div className="self-end">
               <div className="mono mb-3">Registry</div>
