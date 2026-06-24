@@ -17,7 +17,7 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.11"
       - name: pip-audit (backend)
@@ -31,7 +31,7 @@ jobs:
         working-directory: cli
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.11"
       - name: pip-audit (cli)
