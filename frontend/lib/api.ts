@@ -52,8 +52,14 @@ export class APIError extends Error {
   }
 }
 
-function getBaseUrl(clientSide = false): string {
-  return clientSide ? API_PUBLIC_URL : API_INTERNAL_URL;
+function getBaseUrl(clientSide?: boolean): string {
+  // Default by execution context: in the browser use the public URL
+  // (NEXT_PUBLIC_API_URL, the only one inlined client-side); on the server use
+  // the internal URL. API_INTERNAL_URL is undefined in the browser, so a read
+  // called from a client component with the old `false` default silently hit
+  // the localhost fallback — breaking e.g. the registry search in production.
+  const onClient = clientSide ?? typeof window !== "undefined";
+  return onClient ? API_PUBLIC_URL : API_INTERNAL_URL;
 }
 
 function buildAuthHeaders(headers?: HeadersInit): Headers {
@@ -89,7 +95,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
 async function fetchJSON<T>(
   path: string,
   options?: RequestInit,
-  clientSide = false,
+  clientSide?: boolean,
   authenticated = false
 ): Promise<T> {
   const response = await fetch(`${getBaseUrl(clientSide)}${path}`, {
