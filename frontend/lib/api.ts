@@ -34,6 +34,12 @@ function resolveApiUrl(value: string | undefined, varName: string): string {
 const API_INTERNAL_URL = resolveApiUrl(process.env.API_INTERNAL_URL, "API_INTERNAL_URL");
 export const API_PUBLIC_URL = resolveApiUrl(process.env.NEXT_PUBLIC_API_URL, "NEXT_PUBLIC_API_URL");
 
+// Bound every JSON read with a timeout. Without this an unreachable or
+// cold-starting backend makes a server-rendered page's fetch hang forever,
+// which blocks the whole Vercel function and the site never opens. On timeout
+// the fetch aborts and the caller renders its fallback/error UI instead.
+const FETCH_TIMEOUT_MS = Number(process.env.API_FETCH_TIMEOUT_MS) || 10000;
+
 export class APIError extends Error {
   status: number;
   code?: string;
@@ -89,7 +95,8 @@ async function fetchJSON<T>(
   const response = await fetch(`${getBaseUrl(clientSide)}${path}`, {
     ...options,
     headers: authenticated ? buildAuthHeaders(options?.headers) : options?.headers,
-    cache: "no-store"
+    cache: "no-store",
+    signal: options?.signal ?? AbortSignal.timeout(FETCH_TIMEOUT_MS)
   });
   return parseResponse<T>(response);
 }
