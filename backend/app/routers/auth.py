@@ -34,6 +34,7 @@ from app.security import (
     generate_api_key,
     hash_api_key,
 )
+from app.services.account import delete_user, export_user_data
 from app.services.audit import record_audit_event
 
 router = APIRouter()
@@ -45,6 +46,8 @@ _auth_logger = logging.getLogger("evalledger.auth")
 _me_rl = Depends(RateLimit("auth_me", anon_limit=30, auth_limit=30))
 _apikey_create_rl = Depends(RateLimit("auth_apikey_create", anon_limit=10, auth_limit=10))
 _apikey_delete_rl = Depends(RateLimit("auth_apikey_delete", anon_limit=10, auth_limit=10))
+_account_export_rl = Depends(RateLimit("auth_export", anon_limit=5, auth_limit=5))
+_account_delete_rl = Depends(RateLimit("auth_delete", anon_limit=3, auth_limit=3))
 
 
 def _auth_user_payload(user: object) -> dict[str, object]:
@@ -197,3 +200,25 @@ async def me(
         benchmarks=[OwnedBenchmarkResponse.model_validate(item) for item in benchmarks],
         recent_activity=[AuditEventResponse.model_validate(item) for item in activity],
     )
+
+
+@router.get("/me/export", response_model=None)
+async def export_my_data(
+    session: SessionDep,
+    current_user: CurrentUser,
+    _rl: Annotated[None, _account_export_rl] = None,
+) -> dict[str, object]:
+    """Return a machine-readable export of the caller's personal data (GDPR Art. 15/20)."""
+    return await export_user_data(session, current_user)
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_my_account(
+    session: SessionDep,
+    current_user: CurrentUser,
+    _rl: Annotated[None, _account_delete_rl] = None,
+) -> None:
+    """Erase the caller's account: anonymize PII, revoke keys, unlink identities (GDPR Art. 17)."""
+    await delete_user(session, current_user)
+    await session.commit()
+    _auth_logger.info("user.deleted", extra={"user_id": str(current_user.id)})

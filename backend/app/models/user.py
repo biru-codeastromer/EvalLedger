@@ -33,6 +33,10 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Set when the account is erased (GDPR). PII is anonymized in place and the
+    # row is retained so audit/benchmark foreign keys stay intact; auth rejects
+    # any request for a user whose deleted_at is set.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Two FK paths from Benchmark to User (submitter_id and reviewed_by_id)
     # require foreign_keys= to be explicit on both sides of the relationship.

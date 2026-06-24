@@ -35,6 +35,8 @@ async def _authenticate_api_key(api_key: str, session: AsyncSession) -> User:
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
     key, user = cast(tuple[APIKey, User], record)
+    if user.deleted_at is not None:
+        raise AppError("account_deleted", "This account has been deleted", status_code=status.HTTP_401_UNAUTHORIZED)
     key.last_used_at = datetime.now(UTC)
     await session.commit()
     return user
@@ -79,6 +81,8 @@ async def get_current_user(
             extra={"request_id": request_id, "subject": payload.get("sub")},
         )
         raise AppError("user_not_found", "Authenticated user does not exist", status_code=401)
+    if user.deleted_at is not None:
+        raise AppError("account_deleted", "This account has been deleted", status_code=401)
     return user
 
 
