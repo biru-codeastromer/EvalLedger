@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_health_requests: bool = False
 
+    # Error tracking — Sentry is fully opt-in. Leave SENTRY_DSN unset to disable
+    # it entirely (zero overhead, no SDK init). Set it to your project DSN to
+    # forward unhandled exceptions to Sentry.
+    sentry_dsn: str | None = None
+    # Fraction of requests traced for performance monitoring (0.0 = off).
+    sentry_traces_sample_rate: float = 0.0
+
     # Number of trusted reverse proxies in front of the app. Controls how many
     # X-Forwarded-For hops are honoured when deriving the real client IP.
     trusted_proxy_count: int = 1

@@ -48,6 +48,18 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Optional error tracking. Imported lazily and only initialised when a DSN is
+    # configured, so an unset SENTRY_DSN means zero overhead and no SDK init.
+    if settings.sentry_dsn:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+            environment=settings.app_env,
+            release="0.1.0",
+        )
+
     configure_logging(
         log_level=settings.log_level,
         log_health_requests=settings.log_health_requests,
