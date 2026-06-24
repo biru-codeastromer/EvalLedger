@@ -88,6 +88,17 @@ class Settings(BaseSettings):
     worker_enabled: bool = False
     contamination_default_threshold: float = 0.8
     contamination_num_perm: int = 128
+    # Word n-gram (shingle) size used for MinHash and the exact-Jaccard recheck.
+    contamination_shingle_size: int = 5
+    # Cap on how many artifact examples a single detection run will process,
+    # bounding worst-case memory and runtime for very large uploads.
+    contamination_max_examples: int = 100_000
+    # Cap on how many flagged examples are persisted/returned per corpus report
+    # (the reported count may exceed this; only the stored sample is capped).
+    contamination_max_flagged_examples: int = 1_000
+    # Truncation length for example/corpus text stored in a flagged record, to
+    # bound JSONB row size and avoid echoing large corpus content into the API.
+    contamination_max_example_chars: int = 2_000
 
     @model_validator(mode="after")
     def _validate_s3_settings(self) -> Settings:

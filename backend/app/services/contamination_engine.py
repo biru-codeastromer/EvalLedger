@@ -4,12 +4,11 @@ import asyncio
 import csv
 import io
 import json
-import pickle
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 import pyarrow.parquet as pq
@@ -22,8 +21,9 @@ from app.errors import AppError
 from app.logging import logger
 from app.models.contamination import ContaminationReport, ReferenceCorpus
 from app.models.version import BenchmarkVersion
+from app.services.corpus_index import empty_corpus_index, load_corpus_index
 from app.services.storage import StorageService
-from app.utils.minhash import build_minhash, jaccard_tokens, tokenize
+from app.utils.minhash import build_minhash, jaccard_shingles
 
 settings = get_settings()
 
@@ -48,9 +48,13 @@ class ContaminationEngine:
         self.storage_service = storage_service
         self.num_perm = num_perm
         self.threshold = threshold
+        self.shingle_size = settings.contamination_shingle_size
+        self.max_examples = settings.contamination_max_examples
+        self.max_flagged_examples = settings.contamination_max_flagged_examples
+        self.max_example_chars = settings.contamination_max_example_chars
 
     def compute_minhash(self, text: str) -> Any:
-        return build_minhash(text, num_perm=self.num_perm)
+        return build_minhash(text, num_perm=self.num_perm, shingle_size=self.shingle_size)
 
     def _collect_strings(self, payload: Any) -> list[str]:
         collected: list[str] = []
@@ -124,22 +128,18 @@ class ContaminationEngine:
 
     async def _load_bundle(self, corpus: ReferenceCorpus) -> LSHIndexBundle:
         if corpus.minhash_index_path is None:
-            return LSHIndexBundle(
-                corpus=corpus,
-                lsh=MinHashLSH(threshold=self.threshold, num_perm=self.num_perm),
-                entries={},
-            )
+            index = empty_corpus_index(num_perm=self.num_perm)
+            return LSHIndexBundle(corpus=corpus, lsh=index.lsh, entries=index.entries)
         raw_bytes = await self.storage_service.read_bytes(corpus.minhash_index_path)
-        payload = cast(dict[str, object], await asyncio.to_thread(pickle.loads, raw_bytes))
-        entries = payload.get("entries")
-        lsh = payload.get("lsh")
-        if not isinstance(entries, dict) or lsh is None:
-            raise AppError("invalid_corpus_index", "Reference corpus index is invalid", status_code=500)
-        return LSHIndexBundle(
-            corpus=corpus,
-            lsh=cast(MinHashLSH, lsh),
-            entries={str(key): str(value) for key, value in entries.items()},
-        )
+        # Deserialisation rebuilds the LSH from stored hashvalues — no pickle, so
+        # corpus bytes from object storage can never execute code. The LSH is
+        # rebuilt at a recall floor; the configurable threshold is applied below
+        # in the exact shingle-Jaccard recheck instead.
+        try:
+            index = await asyncio.to_thread(load_corpus_index, raw_bytes)
+        except ValueError as exc:
+            raise AppError("invalid_corpus_index", "Reference corpus index is invalid", status_code=500) from exc
+        return LSHIndexBundle(corpus=corpus, lsh=index.lsh, entries=index.entries)
 
     def _classify(self, overlap_score: float) -> str:
         if overlap_score < 0.05:
@@ -156,6 +156,7 @@ class ContaminationEngine:
         status: str,
         overlap_score: float,
         flagged_examples: list[dict[str, Any]],
+        num_flagged: int,
         started_at: datetime,
         completed_at: datetime,
     ) -> ContaminationReport:
@@ -164,7 +165,7 @@ class ContaminationEngine:
             corpus_id=corpus.id,
             status=status,
             overlap_score=overlap_score,
-            num_flagged_examples=len(flagged_examples),
+            num_flagged_examples=num_flagged,
             flagged_examples=flagged_examples,
             minhash_threshold=self.threshold,
             job_started_at=started_at,
@@ -188,50 +189,67 @@ class ContaminationEngine:
             extra={"version_id": version_id, "artifact_name": artifact_name, "corpora": corpus_ids},
         )
         artifact_bytes = await self.storage_service.read_bytes(artifact_location)
-        examples = list(self.extract_examples(artifact_name, artifact_bytes))
-        total_examples = len(examples)
         corpus_statement = select(ReferenceCorpus).where(ReferenceCorpus.id.in_([UUID(item) for item in corpus_ids]))
         corpora = list((await self.session.scalars(corpus_statement)).all())
         bundles = [await self._load_bundle(corpus) for corpus in corpora]
 
-        results: list[dict[str, Any]] = []
         version = None
         if version_id is not None:
             version = await self.session.get(BenchmarkVersion, UUID(version_id))
 
-        for bundle in bundles:
-            flagged_examples: list[dict[str, Any]] = []
-            for index, example in enumerate(examples):
-                minhash = self.compute_minhash(example)
-                candidates = bundle.lsh.query(minhash)
-                best_match_text = None
+        # Single streaming pass over the artifact's examples (no full materialised
+        # list), checking each example against every corpus bundle. Flagged counts
+        # are tracked in full while only a bounded sample of flagged records is kept.
+        flagged_samples: list[list[dict[str, Any]]] = [[] for _ in bundles]
+        flagged_counts: list[int] = [0 for _ in bundles]
+        total_examples = 0
+        for example in self.extract_examples(artifact_name, artifact_bytes):
+            if total_examples >= self.max_examples:
+                logger.warning(
+                    "contamination.job.example_cap_reached",
+                    extra={"version_id": version_id, "cap": self.max_examples},
+                )
+                break
+            example_index = total_examples
+            total_examples += 1
+            example_minhash = self.compute_minhash(example)
+            for bundle_index, bundle in enumerate(bundles):
+                candidates = bundle.lsh.query(example_minhash)
+                best_match_text: str | None = None
                 best_score = 0.0
                 for candidate_key in candidates:
                     candidate_text = bundle.entries.get(candidate_key)
                     if candidate_text is None:
                         continue
-                    score = jaccard_tokens(tokenize(example), tokenize(candidate_text))
+                    score = jaccard_shingles(example, candidate_text, size=self.shingle_size)
                     if score > best_score:
                         best_score = score
                         best_match_text = candidate_text
                 if best_match_text is not None and best_score >= self.threshold:
-                    flagged_examples.append(
-                        {
-                            "example_index": index,
-                            "benchmark_example": example,
-                            "corpus_match": best_match_text,
-                            "similarity": round(best_score, 4),
-                        }
-                    )
-            overlap_score = len(flagged_examples) / total_examples if total_examples else 0.0
+                    flagged_counts[bundle_index] += 1
+                    if len(flagged_samples[bundle_index]) < self.max_flagged_examples:
+                        flagged_samples[bundle_index].append(
+                            {
+                                "example_index": example_index,
+                                "benchmark_example": example[: self.max_example_chars],
+                                "corpus_match": best_match_text[: self.max_example_chars],
+                                "similarity": round(best_score, 4),
+                            }
+                        )
+
+        results: list[dict[str, Any]] = []
+        for bundle_index, bundle in enumerate(bundles):
+            flagged_examples = flagged_samples[bundle_index]
+            flagged_count = flagged_counts[bundle_index]
+            overlap_score = flagged_count / total_examples if total_examples else 0.0
             status = self._classify(overlap_score)
             completed_at = datetime.now(UTC)
-            report_payload = {
+            report_payload: dict[str, Any] = {
                 "corpus_id": str(bundle.corpus.id),
                 "corpus_name": bundle.corpus.name,
                 "status": status,
                 "overlap_score": round(overlap_score, 4),
-                "num_flagged_examples": len(flagged_examples),
+                "num_flagged_examples": flagged_count,
                 "flagged_examples": flagged_examples,
                 "job_started_at": started_at.isoformat(),
                 "job_completed_at": completed_at.isoformat(),
@@ -243,6 +261,7 @@ class ContaminationEngine:
                     status=status,
                     overlap_score=overlap_score,
                     flagged_examples=flagged_examples,
+                    num_flagged=flagged_count,
                     started_at=started_at,
                     completed_at=completed_at,
                 )

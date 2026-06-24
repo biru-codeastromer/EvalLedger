@@ -3,6 +3,7 @@ from app.models.audit import AuditEvent
 from app.models.benchmark import Benchmark
 from app.models.contamination import ContaminationReport, ReferenceCorpus
 from app.models.user import User
+from app.models.user_identity import UserIdentity
 from app.models.version import BenchmarkVersion, Citation
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ContaminationReport",
     "ReferenceCorpus",
     "User",
+    "UserIdentity",
 ]

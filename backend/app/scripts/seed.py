@@ -1,22 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-import pickle
 from dataclasses import dataclass
 from datetime import datetime
 
-from datasketch import MinHashLSH
 from sqlalchemy import select
 
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models.benchmark import Benchmark
 from app.models.contamination import ReferenceCorpus
 from app.models.user import User
 from app.models.version import BenchmarkVersion
 from app.security import hash_password
+from app.services.corpus_index import serialize_corpus_index
 from app.services.storage import StorageService
 from app.services.versioning import VersioningService
-from app.utils.minhash import build_minhash
 
 
 @dataclass(slots=True)
@@ -281,15 +280,18 @@ async def seed() -> None:
             )
             if existing_corpus is not None:
                 continue
-            lsh = MinHashLSH(threshold=0.8, num_perm=128)
+            settings = get_settings()
             entries: dict[str, str] = {}
             for index, corpus_entry in enumerate(corpus_payload.entries):
                 key = f"{corpus_payload.name.lower().replace(' ', '-')}-{index}"
-                lsh.insert(key, build_minhash(corpus_entry, num_perm=128))
                 entries[key] = corpus_entry
-            index_bytes = pickle.dumps({"lsh": lsh, "entries": entries})
+            index_bytes = serialize_corpus_index(
+                entries,
+                num_perm=settings.contamination_num_perm,
+                shingle_size=settings.contamination_shingle_size,
+            )
             stored = await storage.upload_bytes(
-                f"{corpus_payload.name.lower().replace(' ', '-')}.pkl",
+                f"{corpus_payload.name.lower().replace(' ', '-')}.json",
                 index_bytes,
                 directory="corpora",
             )
