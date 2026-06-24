@@ -37,7 +37,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_NO_SYNC=1 \
     VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:$PATH"
+    PATH="/app/.venv/bin:$PATH" \
+    # The venv holds dependencies only (builder used --no-install-project), and
+    # the `app` package lives at /app/app. Console scripts like `alembic` don't
+    # put the working dir on sys.path, so without this the entrypoint's
+    # `alembic upgrade head` fails with ModuleNotFoundError: No module named 'app'.
+    PYTHONPATH=/app
 
 # Runtime-only system libs: libpq5 for Postgres client, curl for HEALTHCHECK.
 RUN apt-get update && apt-get install -y --no-install-recommends \
